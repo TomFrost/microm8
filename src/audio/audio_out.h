@@ -1,13 +1,12 @@
-// Plays the M8's USB audio stream through the board's NS4168 speaker amp, and optionally
-// through an external I2S DAC (e.g. a PCM5102A module) for stereo headphones.
+// Plays the M8's USB audio stream through the board's speaker, or its headphone output where
+// the board has one (see audio/audio_hw.h and src/boards/<board>/audio_hw.cpp).
 //
-// USB delivers 44.1 kHz S16LE stereo. The speaker is mono, so channels are mixed down for it;
-// the headphone output keeps stereo. Only one output plays at a time (the other gets
-// silence), and each output remembers its own volume.
+// USB delivers 44.1 kHz S16LE stereo. Speakers on these boards are mono, so channels are mixed
+// down for them; headphones keep stereo. Only one output plays at a time, and each output
+// remembers its own volume.
 //
 // The M8 and the ESP32's I2S clocks drift relative to each other, so the ring buffer level is
-// held near a target by occasionally dropping or repeating a single frame. Both I2S outputs
-// are clocked from the same source at the same rate, so they never drift from each other.
+// held near a target by occasionally dropping or repeating a single frame.
 #pragma once
 
 #include <stddef.h>

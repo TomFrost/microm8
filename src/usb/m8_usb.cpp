@@ -9,9 +9,14 @@
 #include <usb/usb_helpers.h>
 #include <usb/usb_host.h>
 
-#include "soc/rtc_cntl_struct.h"
 #include "soc/usb_dwc_struct.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "soc/rtc_cntl_struct.h"
 #include "soc/usb_wrap_struct.h"
+#define ROOT_PORT_DWC USB_DWC
+#elif CONFIG_IDF_TARGET_ESP32P4
+#define ROOT_PORT_DWC USB_DWC_HS // the M8 is on the high-speed controller
+#endif
 
 #include "config.h"
 
@@ -200,6 +205,7 @@ const char *speed_name(uint32_t spd) {
 }
 
 void log_phy_routing() {
+#if CONFIG_IDF_TARGET_ESP32S3
   usb_wrap_otg_conf_reg_t otg;
   otg.val = USB_WRAP.otg_conf.val;
   ESP_LOGI(TAG, "phy: rtc sw_hw_sel=%d sw_sel=%d | otg phy_sel=%d pad_en=%d pull_ovr=%d "
@@ -209,6 +215,7 @@ void log_phy_routing() {
            (int)otg.dp_pulldown, (int)otg.dm_pullup, (int)otg.dm_pulldown);
   ESP_LOGI(TAG, "phy: usb-serial-jtag pull_ovr=%d dp_pu=%d",
            (int)RTCCNTL.usb_conf.usb_pad_pull_override, (int)RTCCNTL.usb_conf.usb_dp_pullup);
+#endif
 }
 
 // Logs the root port's state when power, device presence, enable or speed change. The line
@@ -218,7 +225,7 @@ void log_phy_routing() {
 void watch_port() {
   static uint32_t last = UINT32_MAX;
   usb_dwc_hprt_reg_t hprt;
-  hprt.val = USB_DWC.hprt_reg.val;
+  hprt.val = ROOT_PORT_DWC.hprt_reg.val;
 
   usb_dwc_hprt_reg_t key = {};
   key.prtpwr = hprt.prtpwr;
@@ -632,11 +639,14 @@ bool start(StreamBufferHandle_t rx, AudioSink audio) {
   host_cfg.skip_phy_setup = false;
   host_cfg.intr_flags = ESP_INTR_FLAG_LEVEL1;
   host_cfg.enum_filter_cb = enum_filter_cb;
-  // The prebuilt Arduino sdkconfig biases the 256-line (4-byte) FIFO towards periodic OUT.
-  // We need the opposite: room for ~180-byte isochronous IN audio packets alongside bulk IN.
-  host_cfg.fifo_settings_custom.rx_fifo_lines = 136;  // 544 B: two iso packets + status words
+#if CONFIG_IDF_TARGET_ESP32S3
+  // The S3's full-speed controller has a 256-line (4-byte) FIFO, and the prebuilt Arduino
+  // sdkconfig biases it towards periodic OUT. Favour IN traffic: isochronous audio and bulk.
+  // (The P4's high-speed controller has a much larger FIFO; its default split is fine.)
+  host_cfg.fifo_settings_custom.rx_fifo_lines = 136;  // 544 B: iso packets + status words
   host_cfg.fifo_settings_custom.nptx_fifo_lines = 32; // 128 B: two 64 B bulk/control OUT packets
   host_cfg.fifo_settings_custom.ptx_fifo_lines = 16;  // no periodic OUT endpoints in use
+#endif
   esp_err_t err = usb_host_install(&host_cfg);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "usb_host_install: %s", esp_err_to_name(err));

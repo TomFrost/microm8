@@ -1,13 +1,13 @@
 #include "audio_out.h"
 
 #include <atomic>
-#include <driver/i2s_std.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
 
+#include "audio/audio_hw.h"
 #include "config.h"
 
 static const char *TAG = "audio";
@@ -27,9 +27,6 @@ constexpr uint32_t kHighFrames = 2048;
 uint8_t *ring;
 std::atomic<uint32_t> head{0}; // written by producer
 std::atomic<uint32_t> tail{0}; // written by consumer
-
-i2s_chan_handle_t speaker_tx;
-i2s_chan_handle_t headphone_tx; // null unless built with MICROM8_HEADPHONES
 
 std::atomic<Output> cur_output{Output::kSpeaker};
 std::atomic<int> levels[2] = {{7}, {5}}; // indexed by Output
@@ -91,14 +88,29 @@ bool read_chunk(int16_t *in, bool &playing) {
   return true;
 }
 
-// A short beep on the selected output at boot: confirms the I2S path, amp and speaker (or
-// headphone DAC) work independently of USB audio.
+// Prepares one chunk for the selected output: stereo for headphones; for the speaker, a mono
+// mix in both channels (the boards' speaker amps play a single channel).
+void render(const int16_t *in, int16_t *out, Output output, int32_t gain) {
+  if (output == Output::kHeadphones) {
+    for (int i = 0; i < kChunkFrames * 2; i++) out[i] = scale(in[i], gain);
+    return;
+  }
+  for (int i = 0; i < kChunkFrames; i++) {
+    const int16_t m = scale(((int32_t)in[i * 2] + (int32_t)in[i * 2 + 1]) / 2, gain);
+    out[i * 2] = m;
+    out[i * 2 + 1] = m;
+  }
+}
+
+// A short beep on the selected output at boot: confirms the audio hardware works
+// independently of USB audio.
 void boot_beep() {
   constexpr int kFreq = 880;
   constexpr int kMs = 120;
-  static int16_t buf[kChunkFrames * 2];
-  const int32_t gain = level_to_gain_q12(levels[(int)cur_output.load()].load());
-  const bool hp_out = headphone_tx && cur_output == Output::kHeadphones;
+  static int16_t in[kChunkFrames * 2];
+  static int16_t out[kChunkFrames * 2];
+  const Output output = cur_output.load();
+  const int32_t gain = level_to_gain_q12(levels[(int)output].load());
   const int total = kSampleRate * kMs / 1000;
   const int half_period = kSampleRate / (2 * kFreq);
 
@@ -109,84 +121,36 @@ void boot_beep() {
       int32_t s = ((n / half_period) & 1) ? 8192 : -8192;
       const int edge = n < 400 ? n : (total - n < 400 ? total - n : 400);
       s = s * (edge < 0 ? 0 : edge) / 400;
-      buf[i * 2] = buf[i * 2 + 1] = scale(s, gain);
+      in[i * 2] = in[i * 2 + 1] = (int16_t)s;
     }
-    size_t written;
-    i2s_channel_write(hp_out ? headphone_tx : speaker_tx, buf, sizeof(buf), &written,
-                      portMAX_DELAY);
+    render(in, out, output, gain);
+    audio_hw::write(out, kChunkFrames);
   }
 }
 
 void audio_task(void *) {
   static int16_t in[(kChunkFrames + 1) * 2];
-  static int16_t spk[kChunkFrames * 2];
-  static int16_t hp[kChunkFrames * 2];
+  static int16_t out[kChunkFrames * 2];
   bool playing = false;
 
+  Output routed = cur_output.load();
+  audio_hw::route(routed);
   boot_beep();
 
   for (;;) {
-    const bool have_audio = read_chunk(in, playing);
-    const Output out = cur_output.load(std::memory_order_relaxed);
-    const int32_t gain = level_to_gain_q12(levels[(int)out].load(std::memory_order_relaxed));
-
-    const bool to_speaker = have_audio && (out == Output::kSpeaker || !headphone_tx);
-    const bool to_headphones = have_audio && headphone_tx && out == Output::kHeadphones;
-
-    if (to_speaker) {
-      for (int i = 0; i < kChunkFrames; i++) {
-        const int16_t m = scale(((int32_t)in[i * 2] + (int32_t)in[i * 2 + 1]) / 2, gain);
-        spk[i * 2] = m; // the NS4168 plays one channel; feed both
-        spk[i * 2 + 1] = m;
-      }
-    } else {
-      memset(spk, 0, sizeof(spk));
+    const Output output = cur_output.load(std::memory_order_relaxed);
+    if (output != routed) {
+      routed = output;
+      audio_hw::route(routed);
     }
 
-    if (to_headphones) {
-      for (int i = 0; i < kChunkFrames * 2; i++) hp[i] = scale(in[i], gain);
+    if (read_chunk(in, playing)) {
+      render(in, out, output, level_to_gain_q12(levels[(int)output].load(std::memory_order_relaxed)));
     } else {
-      memset(hp, 0, sizeof(hp));
+      memset(out, 0, sizeof(out));
     }
-
-    // Both channels run at the same rate, so each blocking write paces the loop equally.
-    size_t written;
-    i2s_channel_write(speaker_tx, spk, sizeof(spk), &written, portMAX_DELAY);
-    if (headphone_tx) i2s_channel_write(headphone_tx, hp, sizeof(hp), &written, portMAX_DELAY);
+    audio_hw::write(out, kChunkFrames);
   }
-}
-
-i2s_chan_handle_t open_output(i2s_port_t port, int bclk, int ws, int dout) {
-  i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(port, I2S_ROLE_MASTER);
-  chan_cfg.dma_desc_num = 4;
-  chan_cfg.dma_frame_num = 256;
-  chan_cfg.auto_clear = true;
-
-  i2s_chan_handle_t tx = nullptr;
-  if (i2s_new_channel(&chan_cfg, &tx, nullptr) != ESP_OK) {
-    ESP_LOGE(TAG, "i2s_new_channel(%d) failed", (int)port);
-    return nullptr;
-  }
-
-  i2s_std_config_t std_cfg = {
-      .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(kSampleRate),
-      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
-      .gpio_cfg =
-          {
-              .mclk = I2S_GPIO_UNUSED,
-              .bclk = (gpio_num_t)bclk,
-              .ws = (gpio_num_t)ws,
-              .dout = (gpio_num_t)dout,
-              .din = I2S_GPIO_UNUSED,
-              .invert_flags = {.mclk_inv = false, .bclk_inv = false, .ws_inv = false},
-          },
-  };
-  if (i2s_channel_init_std_mode(tx, &std_cfg) != ESP_OK || i2s_channel_enable(tx) != ESP_OK) {
-    ESP_LOGE(TAG, "i2s init on port %d failed", (int)port);
-    i2s_del_channel(tx);
-    return nullptr;
-  }
-  return tx;
 }
 
 } // namespace
@@ -198,22 +162,18 @@ bool start(int speaker_volume, int headphone_volume, Output output) {
     return false;
   }
 
-  speaker_tx = open_output(I2S_NUM_0, I2S_BCLK, I2S_LRCLK, I2S_DOUT);
-  if (!speaker_tx) return false;
-
-#if MICROM8_HEADPHONES
-  // The PCM5102A derives its master clock from BCK, so MCLK is not needed (tie its SCK to GND).
-  headphone_tx = open_output(I2S_NUM_1, HP_BCLK, HP_LRCLK, HP_DOUT);
-  if (!headphone_tx) ESP_LOGE(TAG, "headphone output unavailable");
-#endif
+  if (!audio_hw::begin(kSampleRate)) {
+    ESP_LOGE(TAG, "audio hardware init failed");
+    return false;
+  }
 
   levels[(int)Output::kSpeaker] = clamp_level(speaker_volume);
   levels[(int)Output::kHeadphones] = clamp_level(headphone_volume);
   set_output(output);
 
   xTaskCreatePinnedToCore(audio_task, "audio", 4096, nullptr, 18, nullptr, AUDIO_CORE);
-  ESP_LOGI(TAG, "I2S output running at %d Hz%s", kSampleRate,
-           headphone_tx ? " (speaker + headphone DAC)" : "");
+  ESP_LOGI(TAG, "audio output running at %d Hz%s", kSampleRate,
+           audio_hw::has_headphones() ? " (speaker + headphones)" : "");
   return true;
 }
 
@@ -240,7 +200,7 @@ void push(const uint8_t *pcm, size_t bytes) {
   head.store(h + bytes, std::memory_order_release);
 }
 
-bool headphones_available() { return headphone_tx != nullptr; }
+bool headphones_available() { return audio_hw::has_headphones(); }
 
 void set_output(Output output) {
   if (output == Output::kHeadphones && !headphones_available()) output = Output::kSpeaker;

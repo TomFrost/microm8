@@ -1,10 +1,11 @@
-// microm8: a standalone frontend for the Dirtywave M8 Headless on the Guition JC4827W543.
+// microm8: a standalone frontend for the Dirtywave M8 Headless.
+// Boards: Guition JC4827W543 (ESP32-S3) and M5Stack Tab5 (ESP32-P4); see src/boards/.
 //
 // Tasks:
 //   usb_lib / usb_m8 (core 0)  USB host: M8 CDC serial + isochronous audio  -> usb/m8_usb.cpp
-//   audio            (core 0)  ring buffer -> I2S -> speaker amp / headphone DAC -> audio/audio_out.cpp
-//   ui               (core 1)  SLIP decode, M8 framebuffer, LCD flushes      -> this file
-//   touch            (core 1)  GT911 multi-touch -> M8 key bitmask           -> this file
+//   audio            (core 0)  ring buffer -> board audio hardware           -> audio/audio_out.cpp
+//   ui               (core 1)  SLIP decode, M8 framebuffer, LCD updates      -> this file
+//   touch            (core 1)  multi-touch -> M8 key bitmask                 -> this file
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -12,12 +13,14 @@
 #include <esp_log.h>
 #include <freertos/stream_buffer.h>
 
+#include "audio/audio_hw.h"
 #include "audio/audio_out.h"
+#include "board.h"
 #include "config.h"
 #include "diag/log_capture.h"
 #include "display/ui.h"
-#include "input/gt911.h"
 #include "input/keypad.h"
+#include "input/touch.h"
 #include "m8/protocol.h"
 #include "m8/screen.h"
 #include "usb/m8_usb.h"
@@ -49,12 +52,12 @@ void save_audio_settings() {
 // Switches to headphones when a plug goes in and back to the speaker when it comes out.
 // Only edges count, so the on-screen toggle still works with a plug inserted.
 void poll_jack_detect(uint32_t now) {
-#if MICROM8_HEADPHONES && HP_DETECT_PIN >= 0
   static int stable = -1;
   static int pending = -1;
   static uint32_t pending_since = 0;
 
-  const int inserted = digitalRead(HP_DETECT_PIN) == HP_DETECT_INSERTED_LEVEL;
+  const int inserted = audio_hw::headphones_inserted();
+  if (inserted < 0) return; // no jack detection on this board/build
   if (inserted != pending) {
     pending = inserted;
     pending_since = now;
@@ -67,9 +70,6 @@ void poll_jack_detect(uint32_t now) {
   if (first && !inserted) return; // keep the saved choice at boot if nothing is plugged in
   audio::set_output(inserted ? audio::Output::kHeadphones : audio::Output::kSpeaker);
   audio_settings_changed = true;
-#else
-  (void)now;
-#endif
 }
 
 ui::Status::Link link_for(m8usb::State s) {
@@ -216,7 +216,7 @@ void ui_task(void *) {
 }
 
 void touch_task(void *) {
-  gt911::Point points[gt911::kMaxPoints];
+  touch::Point points[touch::kMaxPoints];
   int count = 0;
   uint8_t mask = 0;
   uint8_t sent_mask = 0;
@@ -224,7 +224,7 @@ void touch_task(void *) {
   ui::Hit prev_hit = ui::Hit::kNone;
 
   for (;;) {
-    if (gt911::read(points, &count)) {
+    if (touch::read(points, &count)) {
       mask = keypad::mask_for(points, count);
       held_keys = mask;
 
@@ -269,20 +269,19 @@ void setup() {
   logcap::begin();
   Serial.begin(115200);
   ESP_LOGI(TAG, "microm8 starting");
+  if (!board::begin()) ESP_LOGE(TAG, "board init failed");
+  ESP_LOGI(TAG, "board: %s", board::name());
 
   prefs.begin("microm8", false);
   const int speaker_volume = prefs.getUChar("vol_spk", 7);
   const int headphone_volume = prefs.getUChar("vol_hp", 4); // line level is loud; start low
   const auto output = (audio::Output)prefs.getUChar("output", (uint8_t)audio::Output::kSpeaker);
-#if MICROM8_HEADPHONES && HP_DETECT_PIN >= 0
-  pinMode(HP_DETECT_PIN, INPUT_PULLUP);
-#endif
 
   if (!m8screen::init()) ESP_LOGE(TAG, "framebuffer init failed");
   m8proto::init();
 
   if (!ui::begin()) ESP_LOGE(TAG, "display init failed");
-  const bool touch_ok = gt911::begin();
+  const bool touch_ok = touch::begin();
   if (!touch_ok) ESP_LOGE(TAG, "touch init failed; on-screen keys disabled");
   if (!audio::start(speaker_volume, headphone_volume, output)) {
     ESP_LOGE(TAG, "audio init failed");

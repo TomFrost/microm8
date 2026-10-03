@@ -1,4 +1,5 @@
-#include "gt911.h"
+// GT911 capacitive touch driver: the JC4827W543 implementation of input/touch.h.
+#include "input/touch.h"
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -8,7 +9,7 @@
 
 static const char *TAG = "gt911";
 
-namespace gt911 {
+namespace touch {
 namespace {
 
 constexpr uint8_t kAddrPrimary = 0x5D;   // INT low during reset
@@ -131,4 +132,4 @@ bool read(Point *points, int *count) {
   return true;
 }
 
-} // namespace gt911
+} // namespace touch

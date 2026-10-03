@@ -1,14 +1,13 @@
-// On-screen M8 keypad: layout and multi-touch hit testing.
+// On-screen M8 keypad: multi-touch hit testing over a board-specific key layout.
 //
-// The M8's eight keys are laid out in a 160x272 panel beside the M8 screen. They keep the
-// M8's grouping, folded to fit the column: SHIFT/PLAY over OPTION/EDIT, then the cursor
-// cluster as an inverted T. Hit areas tile the panel with no dead space between keys, so a
-// finger sliding across the cursor keys moves cleanly from one to the next.
+// Each board defines its layout in src/boards/<board>/keypad_layout.cpp. A key's hit rect may
+// be larger than its drawn rect, so fingers sliding between neighbouring keys don't fall
+// into gaps.
 #pragma once
 
 #include <stdint.h>
 
-#include "input/gt911.h"
+#include "input/touch.h"
 
 namespace keypad {
 
@@ -18,16 +17,16 @@ struct Key {
   const char *label;
   uint8_t bit; // m8proto::Key
   Icon icon;
-  int16_t x, y, w, h; // hit rect, LCD coordinates
-  int16_t vy, vh;     // drawn extent (the hit rect also covers half the row divider)
+  int16_t x, y, w, h;     // hit rect, screen coordinates
+  int16_t vx, vy, vw, vh; // drawn rect (before kInset); the hit rect may extend past it
 };
 
 constexpr int kKeyCount = 8;
-constexpr int kInset = 3; // visual gap inside each hit rect
+constexpr int kInset = 3; // drawn keys are inset by this much from their drawn rect
 
-const Key *keys();
+const Key *keys(); // kKeyCount entries; defined by the board's keypad_layout.cpp
 
 // Bitmask of M8 keys currently held by any touch point.
-uint8_t mask_for(const gt911::Point *points, int count);
+uint8_t mask_for(const touch::Point *points, int count);
 
 } // namespace keypad
