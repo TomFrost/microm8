@@ -4,6 +4,7 @@
 #include <esp_log.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <stdio.h>
 #include <string.h>
 #include <usb/usb_helpers.h>
 #include <usb/usb_host.h>
@@ -329,6 +330,71 @@ void parse_config(const usb_config_desc_t *cfg) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostics: describe the device's interfaces and endpoints
+// ---------------------------------------------------------------------------
+
+// Raw hex for class-specific descriptors in ESP-IDF's full descriptor printout.
+void print_class_desc_hex(const usb_standard_desc_t *d) {
+  const uint8_t *b = (const uint8_t *)d;
+  printf("\t*** class-specific (type 0x%02X, %u bytes):", b[1], b[0]);
+  for (int i = 0; i < b[0]; i++) printf(" %02X", b[i]);
+  printf("\n");
+}
+
+// Logs every interface and endpoint, decoding USB Audio Class 1.0 streaming formats, so we
+// can see which audio directions, formats and sync modes the M8 offers.
+void log_descriptor_summary(const usb_config_desc_t *cfg) {
+  static const char *types[] = {"control", "iso", "bulk", "interrupt"};
+  static const char *syncs[] = {"none", "async", "adaptive", "sync"};
+  static const char *usages[] = {"data", "feedback", "implicit-fb", "reserved"};
+
+  ESP_LOGI(TAG, "config: %u interfaces, %u bytes", cfg->bNumInterfaces, cfg->wTotalLength);
+  int offset = 0;
+  const usb_standard_desc_t *d = (const usb_standard_desc_t *)cfg;
+  const usb_intf_desc_t *intf = nullptr;
+  while ((d = usb_parse_next_descriptor(d, cfg->wTotalLength, &offset)) != nullptr) {
+    const uint8_t *b = (const uint8_t *)d;
+    if (d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+      intf = (const usb_intf_desc_t *)d;
+      ESP_LOGI(TAG, "  iface %u alt %u: class %02X sub %02X proto %02X, %u endpoints",
+               intf->bInterfaceNumber, intf->bAlternateSetting, intf->bInterfaceClass,
+               intf->bInterfaceSubClass, intf->bInterfaceProtocol, intf->bNumEndpoints);
+    } else if (d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+      const usb_ep_desc_t *ep = (const usb_ep_desc_t *)d;
+      const uint8_t attr = ep->bmAttributes;
+      const bool iso = (attr & 3) == 1;
+      char extra[64] = "";
+      if (iso) {
+        snprintf(extra, sizeof(extra), " sync=%s usage=%s", syncs[(attr >> 2) & 3],
+                 usages[(attr >> 4) & 3]);
+        if (b[0] >= 9) { // audio class endpoints carry bRefresh and bSynchAddress
+          snprintf(extra + strlen(extra), sizeof(extra) - strlen(extra),
+                   " refresh %u synch-addr 0x%02X", b[7], b[8]);
+        }
+      }
+      ESP_LOGI(TAG, "    EP 0x%02X %s %s mps %u (raw 0x%04X) interval %u%s", ep->bEndpointAddress,
+               (ep->bEndpointAddress & 0x80) ? "IN " : "OUT", types[attr & 3],
+               USB_EP_DESC_GET_MPS(ep), ep->wMaxPacketSize, ep->bInterval, extra);
+    } else if (intf && intf->bInterfaceClass == kClassAudio &&
+               intf->bInterfaceSubClass == kSubclassAudioStreaming && b[1] == 0x24 && b[0] >= 3) {
+      if (b[2] == 0x01 && b[0] >= 7) { // AS_GENERAL
+        ESP_LOGI(TAG, "    AS general: terminal link %u, delay %u, format tag 0x%04X", b[3], b[4],
+                 b[5] | (b[6] << 8));
+      } else if (b[2] == 0x02 && b[0] >= 8 && b[3] == 0x01) { // FORMAT_TYPE I
+        char rates[64] = "";
+        for (int i = 0; i < b[7] && 8 + i * 3 + 2 < b[0]; i++) {
+          const uint32_t hz = b[8 + i * 3] | (b[9 + i * 3] << 8) | (b[10 + i * 3] << 16);
+          snprintf(rates + strlen(rates), sizeof(rates) - strlen(rates), "%s%lu", i ? "," : "",
+                   (unsigned long)hz);
+        }
+        ESP_LOGI(TAG, "    format: %u ch, %u-byte subframes, %u-bit, rates %s Hz%s", b[4], b[5],
+                 b[6], rates, b[7] == 0 ? " (continuous)" : "");
+      }
+    }
+  }
+}
+
 bool start_audio() {
   if (eps.audio_iface < 0 || eps.iso_mps == 0) {
     ESP_LOGW(TAG, "no isochronous audio endpoint found; audio disabled");
@@ -428,6 +494,12 @@ void open_device(uint8_t addr) {
   const usb_config_desc_t *cfg;
   usb_host_get_active_config_descriptor(dev, &cfg);
   parse_config(cfg);
+
+  if (dd->idVendor == kPjrcVid) {
+    log_descriptor_summary(cfg);
+    usb_print_device_descriptor(dd);
+    usb_print_config_descriptor(cfg, print_class_desc_hex);
+  }
 
   if (dd->idVendor != kPjrcVid || eps.data_iface < 0 || !eps.bulk_in || !eps.bulk_out) {
     ESP_LOGW(TAG, "not an M8 (no PJRC CDC interface); ignoring");
