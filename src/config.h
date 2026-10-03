@@ -16,9 +16,11 @@
 //   |  +----------------+  |   520
 //   |  status bar          |   544 .. 608
 //   |                      |
+//   |          OPT  EDIT   |   708
+//   |      ^               |
+//   |  <   v   >           |
 //   |                      |
-//   |     ^      SHIFT PLAY|   968
-//   |  <  v  >   OPT   EDIT|   1104 .. 1232
+//   |     SHIFT PLAY       |   .. 1232
 //   +----------------------+   1280
 // ---------------------------------------------------------------------------
 #define LCD_WIDTH 720
@@ -33,11 +35,11 @@
 #define STATUS_W LCD_WIDTH
 #define STATUS_H 64
 
-// Keypad (see keypad_layout.cpp): the M8's own arrangement, sized for thumbs.
-#define KEY_SIZE 128
-#define KEY_SPACING 8 // between keys in a group
-#define KEY_GROUP_GAP 24 // between the cursor keys and SHIFT/PLAY/OPTION/EDIT
-#define KEY_MARGIN 16 // left/right screen margin
+// Keypad (see keypad_layout.cpp): the M8's own arrangement on a regular grid, with OPTION/EDIT
+// shifted up and right, and SHIFT/PLAY down, by KEY_OFFSET. Proportions follow the M8.
+#define KEY_SIZE 144
+#define KEY_SPACING 24 // between neighbouring keys on the grid
+#define KEY_OFFSET 22  // extra shift of the OPTION/EDIT and SHIFT/PLAY pairs
 #define KEY_BOTTOM_MARGIN 48
 
 // ---------------------------------------------------------------------------

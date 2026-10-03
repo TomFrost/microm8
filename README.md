@@ -22,19 +22,18 @@ The Tab5's 5" screen is used in portrait (720×1280):
 - **M8 screen at 2×** (640×480) at the top, a clean integer scale of the Headless's 320×240.
 - **Status bar:** connection and firmware version, battery level, speaker/headphone toggle,
   volume.
-- **The M8's own key layout** along the bottom, sized for two thumbs: the cursor keys as an
-  inverted T on the left, SHIFT/PLAY over OPTION/EDIT on the right. Keys are 128 px
-  (about 11 mm).
+- **The M8's own key layout** along the bottom: the cursor keys as an inverted T, SHIFT/PLAY
+  directly under DOWN/RIGHT, and OPTION/EDIT up and to the right of UP, as on the hardware.
+  Keys are 144 px (about 12.5 mm).
 
 To turn the layout upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`.
 
 ## Controls
 
 - **Keys:** every key a finger is touching counts as held, so M8 combos work as on the
-  hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Within each key group,
-  touch areas meet with no dead space, so a thumb can slide from key to key. The gap between
-  the cursor keys and the action keys is dead space, so a thumb on the arrows can't catch
-  SHIFT.
+  hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Each key's touch area
+  reaches halfway into the gap around it, so near misses still count without neighbouring
+  keys overlapping.
 - **SPK / HP:** chooses the speaker or the headphone jack. Each output keeps its own volume.
 - **Volume:** `−`/`+` (0–10). Volumes and the selected output are saved to flash.
 
