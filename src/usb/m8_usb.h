@@ -1,8 +1,8 @@
-// USB host driver for the M8 Headless (Teensy 4.1), using the ESP32-S3's OTG port.
+// USB host driver for the M8 Headless (Teensy 4.1) on the Tab5's high-speed USB-A port.
 //
 // The M8 enumerates as a composite device: a CDC-ACM serial port carrying the SLIP display
-// protocol and key input, plus a USB Audio Class streaming interface with an isochronous IN
-// endpoint (44.1 kHz, 16-bit stereo). This replaces m8c's libusb backend
+// protocol and key input, USB Audio Class 2.0 streaming in both directions (44.1 kHz, 16-bit
+// stereo), and USB MIDI. See docs/m8-headless-usb.md. This replaces m8c's libusb backend
 // (m8_libusb.c / audio_libusb.c).
 #pragma once
 

@@ -1,5 +1,4 @@
-// microm8: a standalone frontend for the Dirtywave M8 Headless.
-// Boards: Guition JC4827W543 (ESP32-S3) and M5Stack Tab5 (ESP32-P4); see src/boards/.
+// microm8: a standalone frontend for the Dirtywave M8 Headless on the M5Stack Tab5 (ESP32-P4).
 //
 // Tasks:
 //   usb_lib / usb_m8 (core 0)  USB host: M8 CDC serial + isochronous audio  -> usb/m8_usb.cpp
@@ -57,7 +56,7 @@ void poll_jack_detect(uint32_t now) {
   static uint32_t pending_since = 0;
 
   const int inserted = audio_hw::headphones_inserted();
-  if (inserted < 0) return; // no jack detection on this board/build
+  if (inserted < 0) return; // jack detection not configured (see TAB5_HP_DET_INSERTED_LEVEL)
   if (inserted != pending) {
     pending = inserted;
     pending_since = now;
@@ -94,7 +93,7 @@ void show_disconnected(m8usb::State s) {
     ui::show_splash("Could not set up the M8", "Check the serial log; try replugging");
     break;
   default:
-    ui::show_splash("Connect M8 Headless to USB-C", "Teensy 4.1 needs 5V; see README");
+    ui::show_splash("Connect M8 Headless", "Plug the Teensy into the USB-A port");
     break;
   }
 }
@@ -210,6 +209,7 @@ void ui_task(void *) {
       st.oversized = m8screen::oversized();
       st.headphones_available = audio::headphones_available();
       st.headphones = audio::output() == audio::Output::kHeadphones;
+      st.battery = board::battery_percent();
       ui::draw_status(st);
     }
   }

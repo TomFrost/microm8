@@ -1,5 +1,5 @@
 // Splash screen and on-screen log, drawn into the M8 framebuffer while no M8 is connected.
-// Shared by all boards: each board's ui.cpp presents the framebuffer like any M8 frame.
+// ui.cpp presents the framebuffer like any M8 frame.
 #include <string.h>
 
 #include "config.h"

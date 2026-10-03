@@ -1,5 +1,4 @@
-// Multi-touch input. Each board provides an implementation (GT911 on the JC4827W543,
-// M5Unified on the Tab5).
+// Multi-touch input, through M5Unified (touch.cpp).
 #pragma once
 
 #include <stdint.h>

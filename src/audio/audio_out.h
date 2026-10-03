@@ -1,8 +1,8 @@
-// Plays the M8's USB audio stream through the board's speaker, or its headphone output where
-// the board has one (see audio/audio_hw.h and src/boards/<board>/audio_hw.cpp).
+// Plays the M8's USB audio stream through the Tab5's speaker or headphone jack (hardware in
+// audio_hw.cpp).
 //
-// USB delivers 44.1 kHz S16LE stereo. Speakers on these boards are mono, so channels are mixed
-// down for them; headphones keep stereo. Only one output plays at a time, and each output
+// USB delivers 44.1 kHz S16LE stereo. The speaker is mono, so channels are mixed down for it;
+// headphones keep stereo. Only one output plays at a time, and each output
 // remembers its own volume.
 //
 // The M8 and the ESP32's I2S clocks drift relative to each other, so the ring buffer level is

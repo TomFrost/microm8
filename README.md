@@ -1,113 +1,64 @@
 # microm8
 
-Standalone firmware that turns a **Guition JC4827W543** (ESP32-S3, 4.3" 480×272 capacitive touchscreen, speaker) into a screen, speaker and keypad for a **Dirtywave M8 Headless** running on a Teensy 4.1.
+Standalone firmware that turns an **M5Stack Tab5** (ESP32-P4) into a battery-powered handheld
+for the **Dirtywave M8 Headless** running on a Teensy 4.1.
 
-The Teensy plugs into the board's USB-C port. The ESP32-S3 acts as the USB host. It renders the M8's display, plays its audio through the onboard speaker, and sends key presses from an on-screen multi-touch keypad.
+The Teensy plugs into the Tab5's USB-A port. The Tab5 powers it, renders the M8's screen,
+plays its audio through the speaker or headphone jack, and sends key presses from an
+on-screen multi-touch keypad laid out like the real M8.
 
-The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimplemented for the ESP32.
+The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimplemented for the
+ESP32.
 
-![Screen layout](docs/layout-preview.png)
+<img src="docs/layout-preview.png" width="360" alt="Portrait layout: M8 screen at the top, status bar, M8 keys at the bottom">
 
-*Layout preview at 2× scale, with SHIFT and RIGHT held. The M8 area shows test output from the unit-test harness.*
+*Layout preview with SHIFT and RIGHT held. The M8 area shows test output from the unit-test
+harness.*
 
-## Screen layout: why landscape
+## Layout
 
-The M8 Headless draws a **320×240** screen. The panel is **480×272**.
+The Tab5's 5" screen is used in portrait (720×1280):
 
-| Orientation | Width available | Fits 320×240 at 1:1? |
-|---|---|---|
-| Portrait (272×480) | 272 px | **No.** It would have to shrink to 85%, which garbles the M8's 5×7 pixel font. |
-| Landscape (480×272) | 480 px | **Yes**, and it leaves a free **160×272** column plus a 320×32 strip. |
+- **M8 screen at 2×** (640×480) at the top, a clean integer scale of the Headless's 320×240.
+- **Status bar:** connection and firmware version, battery level, speaker/headphone toggle,
+  volume.
+- **The M8's own key layout** along the bottom, sized for two thumbs: the cursor keys as an
+  inverted T on the left, SHIFT/PLAY over OPTION/EDIT on the right. Keys are 128 px
+  (about 11 mm).
 
-Landscape at 1:1 leaves enough room for all eight M8 keys on screen. Each key is about **53–80 px × 64 px**, or about 10.5–16 mm × 12.7 mm on this panel, which is comfortable for fingertips. The keys keep the M8's grouping, folded into a column:
-
-```
- ┌───────┬───────┐
- │ SHIFT │ PLAY  │
- ├───────┼───────┤
- │OPTION │ EDIT  │
- └───────┴───────┘
-     ┌───┐
-     │ ▲ │
- ┌───┼───┼───┐
- │ ◀ │ ▼ │ ▶ │
- └───┴───┴───┘
-```
-
-The strip under the M8 screen is a status bar showing connection state, firmware version and volume.
-
-To put the keypad on the left instead, add `-DMICROM8_PANEL_LEFT=1` to `build_flags` in `platformio.ini`.
-
-### Why not a Bluetooth gamepad?
-
-The ESP32-S3 only supports **Bluetooth LE**. The 8BitDo Pro 2 (like most gamepads) uses **Bluetooth Classic (BR/EDR)** in every mode, so the two can't pair. See [Bluepad32's notes](https://bluepad32.readthedocs.io/en/latest/supported_gamepads/). A BLE-only controller could be added later. The on-screen keypad makes a gamepad unnecessary.
+To turn the layout upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`.
 
 ## Controls
 
-- **Keys:** the GT911 tracks up to 5 fingers. Every key a finger is touching counts as held, so M8 combos work as on the hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Sliding a finger across the cursor keys moves from key to key with no dead space in between.
-- **Volume:** use the `−`/`+` buttons in the status bar (0–10). The setting is saved to flash.
-- **Speaker / headphones:** with the optional headphone DAC built in, an `SPK`/`HP` button appears in the status bar. Only the selected output plays, and each output keeps its own volume.
+- **Keys:** every key a finger is touching counts as held, so M8 combos work as on the
+  hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Within each key group,
+  touch areas meet with no dead space, so a thumb can slide from key to key. The gap between
+  the cursor keys and the action keys is dead space, so a thumb on the arrows can't catch
+  SHIFT.
+- **SPK / HP:** chooses the speaker or the headphone jack. Each output keeps its own volume.
+- **Volume:** `−`/`+` (0–10). Volumes and the selected output are saved to flash.
 
 ## Hardware setup
 
-### Power (important)
-
-The board's USB-C VBUS line goes **into** the board through a Schottky diode (D1). **The board cannot power the Teensy over USB**, and its own LiPo circuit can't either (the boosted battery output only reaches test pad S1). Supply 5 V some other way.
-
-**Simplest: one 5 V source into the Teensy.** Feed a regulated 5.1–5.2 V supply (for example an 18650 → charger → switch → 5 V boost) into the Teensy 4.1's **VIN** and **GND** pins. Leave the VUSB–VIN pad joined, as it ships. The Teensy then drives VBUS on its USB jack, and the display is powered back through the USB cable and D1. Notes:
-
-- Leave the display's BAT connector empty, or its charger chip will try to charge that LiPo from your supply.
-- Use a supply rated for 1 A or more. Expect about 400 mA typical and 600 mA with the speaker loud.
-- Stay at or below 5.5 V, the limit for both the Teensy's VIN and the charger chip.
-- D1 drops about 0.35 V, and the display's charger chip wants at least 4.65 V. If the display resets when audio gets loud, also run the 5 V into the display's 4-pin JST **P1** header (pin 1 = VIN, pin 4 = GND), which bypasses D1.
-
-### Data
-
-Connect the board's **USB-C** to the Teensy's **micro-USB** with a plain USB-C ↔ micro-B data cable. You don't need an OTG adapter: host mode is set in firmware.
-
-### Headphones (optional)
-
-For stereo headphones, wire an I2S DAC module such as the common PCM5102A board to two of the display's headers, and build with `-DMICROM8_HEADPHONES=1` (uncomment it in `platformio.ini`).
-
-| Display header | Signal | PCM5102A pin |
-|---|---|---|
-| P4 pin 1 (or P5 pin 1) | GND | GND |
-| P4 pin 2 (or P5 pin 2) | 3.3 V | VIN |
-| P4 pin 3 (or P5 pin 3) | IO17 | BCK |
-| P4 pin 4 (or P5 pin 4) | IO18 | LCK |
-| P3 pin 1 | IO6 | DIN |
-
-P4 (JST 1.25 mm) and P5 (JST SH 1.0 mm) carry the same signals, so use whichever connector you have cables for.
-
-On the PCM5102A module:
-- **SCK** must be grounded. That makes the DAC derive its clock from BCK; the board's SCK jumper usually does this already.
-- **Config pins 1–4** (FLT, DEMP, XSMT, FMT) must be set to **L, L, H, L**. If XSMT is low, the DAC stays muted.
-
-The PCM5102A outputs line level: fine for high-impedance headphones, a bit strained on 16–32 Ω ones. Headphone volume starts at 4/10.
-
-**Jack detect (optional):** if your jack has a detect switch, wire it to P3 pin 2 (IO7) and add `-DHP_DETECT_PIN=7` so plugging in switches outputs automatically. Common PCM5102A boards don't have one, so use the `SPK`/`HP` button instead. The input is pulled up internally. If the switch reads high rather than low with a plug inserted, also add `-DHP_DETECT_INSERTED_LEVEL=1`.
-
-### Serial log
-
-Once the firmware is running, the USB port is in host mode, so logs go to **UART0** on the P1 header (TX = GPIO43, RX = GPIO44) at 115200 baud. Use a 3.3 V USB-UART adapter there to watch them (`pio device monitor`).
+- **M8:** connect the Teensy 4.1's micro-USB to the Tab5's **USB-A** port with a data cable.
+  The Tab5 supplies 5 V on that port, so the Teensy needs no other power.
+- **USB-C:** charging, flashing and serial logs. It's a separate USB controller from the M8's
+  port, so logs work while the M8 is connected.
+- **Battery:** the Tab5's NP-F550 pack powers everything.
 
 ## Building and flashing
 
-You need [PlatformIO](https://platformio.org/). The project uses the [pioarduino](https://github.com/pioarduino/platform-espressif32) platform (Arduino core 3.x on ESP-IDF 5.5), because the stock PlatformIO platform's ESP-IDF 4.4 USB host stack can't do isochronous transfers, which USB audio needs.
+You need [PlatformIO](https://platformio.org/). The project uses the
+[pioarduino](https://github.com/pioarduino/platform-espressif32) platform (Arduino core 3.x
+on ESP-IDF 5.5), because the stock PlatformIO platform's ESP-IDF 4.4 USB host stack can't do
+isochronous transfers, which USB audio needs.
 
 ```bash
-pio run -e jc4827w543
+pio run -t upload -t monitor
 ```
 
-The first build rebuilds the Arduino core with the settings in `custom_sdkconfig` (a bigger USB control-transfer limit and INFO-level logging), which takes several minutes.
-
-To flash, disconnect the Teensy and connect the board to your computer. Because the firmware takes over the USB port, auto-reset doesn't work after the first flash. Enter the bootloader manually: **hold BOOT, tap RST, release BOOT**. Then run:
-
-```bash
-pio run -e jc4827w543 -t upload
-```
-
-Tap RST after flashing, then plug in the Teensy.
+The first build takes several minutes: `custom_sdkconfig` makes pioarduino rebuild the Arduino
+core from ESP-IDF source (see [Troubleshooting](#troubleshooting)). Later builds take seconds.
 
 ### Tests
 
@@ -121,40 +72,77 @@ pio test -e native
 
 | Module | Role |
 |---|---|
-| `src/usb/m8_usb.cpp` | USB host client. Finds the M8's CDC data interface and USB Audio streaming interface by parsing descriptors, sets DTR/RTS and line coding, keeps bulk IN, bulk OUT and isochronous IN transfers in flight. Replaces m8c's libusb backend. |
+| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
 | `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. Ported from m8c. |
 | `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
-| `src/display/ui.cpp` | Drives the NV3041A over QSPI using Arduino_GFX. Copies changed bands to the LCD at up to 60 Hz, and draws the keypad and status bar. |
-| `src/input/gt911.cpp`, `keypad.cpp` | Multi-touch GT911 driver and key hit-testing. Produces the M8 key bitmask (`'C'` + mask). |
-| `src/audio/audio_out.cpp` | Ring buffer → I2S → NS4168 speaker amp (mixed to mono), or → second I2S port → headphone DAC (stereo). Applies per-output volume, and compensates for clock drift by dropping or repeating single frames. |
+| `src/display/ui.cpp` | Portrait layout through M5GFX: scales changed bands 2× to the display at up to 60 Hz, draws the keypad and status bar. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
+| `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and key hit-testing. Produces the M8 key bitmask (`'C'` + mask). |
+| `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), per-output volume, mono mix for the speaker. |
+| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0, speaker amp enable, headphone detect. |
+| `src/board.cpp` | M5Unified bring-up, USB-A 5 V, battery gauge, and the lock for the shared internal I2C bus. |
 
-FreeRTOS tasks: USB and audio run on core 0; display and touch run on core 1. Serial data passes from USB to the UI task through a stream buffer, so a slow LCD transfer never stalls USB.
+FreeRTOS tasks: USB and audio run on core 0; display and touch run on core 1. Serial data
+passes from USB to the UI task through a stream buffer, so a slow display update never stalls
+USB.
 
-Board pin assignments are in `src/config.h`. They come from the vendor's IO sheet and schematic (see the [profi-max](https://github.com/profi-max/JC4827W543_4.3inch_ESP32S3_board) and [OldNKrusty](https://github.com/OldNKrusty/JC4827W543-ESP32S3-Guide) references).
+## Status
+
+**Not yet tested on a Tab5.** It builds cleanly and the protocol and renderer tests pass. The
+USB host code, M8 protocol and rendering were proven on an earlier ESP32-S3 prototype
+(see [History](#history)). Things to check first on hardware:
+
+- **Chip revision:** esptool prints it when flashing. The build targets ESP32-P4 revisions
+  before 3.0; a v3.x chip needs a different target.
+- **Orientation:** the layout should be upright. If not, use `TAB5_ROTATE_180`.
+- **M8 at high speed:** the `port:` log line should show `speed=high` once the M8 connects.
+- **Audio:** the `audio:` summary logged every 5 seconds should show about 880,000 bytes and
+  a non-zero `peak` while the M8 plays.
+- **Headphone detect:** plug and unplug headphones and watch for `HP_DET reads 0/1` in the
+  log. Then set `TAB5_HP_DET_INSERTED_LEVEL` to the value that means "inserted", and the
+  output switches automatically.
+
+### Roadmap
+
+- **Sampling into the M8:** stream the Tab5's ES7210 microphones to the M8's USB audio input
+  (asynchronous, with a rate-feedback endpoint).
+- **USB MIDI keyboard on USB-C:** run the P4's second USB controller as a host and forward a
+  keyboard's MIDI to the M8's USB MIDI input. Open question: whether USB-C can supply 5 V to
+  a bus-powered keyboard.
 
 ## Troubleshooting
 
-**While no M8 is connected, the M8 area shows the last 12 log lines**, so you can debug without a USB-UART adapter. Errors are red and warnings amber.
+**While no M8 is connected, the M8 area shows the last 12 log lines**, so many problems can be
+diagnosed without a computer. Errors are red and warnings amber.
 
-**The display stays on "Waiting for M8" and the log shows nothing about a device.**
-- Check that the cable carries data, not just power: plug the Teensy into a computer with the same cable and see whether m8c finds it.
-- That same test confirms the Teensy is running M8 Headless.
+**"Waiting for M8" and the `port:` log line shows `connected=0` the whole time.** The Tab5
+sees nothing on the data lines. The cable is probably charge-only, or the Teensy isn't
+running M8 Headless. Test both by plugging the Teensy into a computer with the same cable and
+checking that m8c finds it.
 
-**The `port:` log lines show `connected=0 lines=SE0` the whole time.** The ESP32 sees nothing on the data lines. The cable is probably charge-only (it powers the display but carries no data), or the Teensy isn't running. A working connection shows `connected=1 lines=J … speed=full`.
+**The log shows `ENUM: Abort request of enumeration process (0x48a:0x16c0)`.** ESP-IDF
+rejected the device because no enumeration filter approved it. The Arduino core enables the
+filter hook, and ESP-IDF then rejects anything a filter hasn't approved. The firmware
+installs a filter that accepts all devices; if you see this, that code is missing.
 
-**The log shows `ENUM: Abort request of enumeration process (0x48a:0x16c0)`.** ESP-IDF rejected the device because no enumeration filter approved it: the Arduino core enables the filter hook, and then ESP-IDF rejects anything a filter hasn't approved. The firmware installs a filter that accepts all devices; if you see this message, that code is missing.
+**The log shows `Configuration descriptor larger than control transfer max length`.** The
+USB stack's control-transfer limit is too small for the M8's 376-byte descriptor.
+`platformio.ini` raises it through `custom_sdkconfig`. Check that setting is still there and
+do a clean build (`pio run -t clean`, then build again).
 
-**The log shows `Configuration descriptor larger than control transfer max length`.** The USB stack's control-transfer limit is too small for the M8's descriptor. `platformio.ini` raises it through `custom_sdkconfig`. If you see this, check that setting is still there and do a clean build (`pio run -t clean`, then build again).
+**The build fails with `No module named 'SCons.Tool.FortranCommon'` (or another SCons
+error).** pioarduino swaps build-tool versions during a build, mostly on the first run after
+`custom_sdkconfig` changes, and with more than one PlatformIO Core installed. Run the build
+again. If it keeps happening, delete `~/.platformio/packages/tool-scons` and retry.
 
-**The first build takes several minutes** because `custom_sdkconfig` makes pioarduino rebuild the Arduino core from ESP-IDF source. Later builds are fast. If the build fails while installing tools, run it again; pioarduino sometimes swaps tool versions on the first run.
+## History
 
-## Status and known limitations
-
-- **Not yet tested on hardware.** The firmware compiles cleanly and the protocol and renderer tests pass. USB enumeration, audio streaming and touch orientation still need checking on a real board with an M8.
-- **Touch orientation:** if touches land in the wrong place, set `TOUCH_SWAP_XY`, `TOUCH_MIRROR_X` or `TOUCH_MIRROR_Y` in `build_flags`.
-- **Model:02 resolution:** if a device reports Model:02 (480×320), only the top-left 320×240 is shown and the status bar says `(crop)`. Headless reports 320×240, so this shouldn't come up.
-- **Not implemented:** m8c's keyjazz mode (computer keyboard as a note keyboard) and its screensaver.
+microm8 began on a Guition JC4827W543 (ESP32-S3, 4.3" 480×272). That version rendered the M8
+and took touch input, but the S3's USB is full-speed only. The M8's audio is timed for
+high-speed USB, so a full-speed host receives only about an eighth of it, and the Headless
+doesn't output audio on I2S either. That's why the project moved to the Tab5. The
+JC4827W543 code remains in the git history: commit `0821825` is the last version with it.
 
 ## License
 
-Portions are derived from m8c and the SLIP decoder (both MIT). See [LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md).
+Portions are derived from m8c, the SLIP decoder and M5Unified (all MIT). See
+[LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md).

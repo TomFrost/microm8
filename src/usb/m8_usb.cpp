@@ -10,13 +10,6 @@
 #include <usb/usb_host.h>
 
 #include "soc/usb_dwc_struct.h"
-#if CONFIG_IDF_TARGET_ESP32S3
-#include "soc/rtc_cntl_struct.h"
-#include "soc/usb_wrap_struct.h"
-#define ROOT_PORT_DWC USB_DWC
-#elif CONFIG_IDF_TARGET_ESP32P4
-#define ROOT_PORT_DWC USB_DWC_HS // the M8 is on the high-speed controller
-#endif
 
 #include "config.h"
 
@@ -38,15 +31,16 @@ constexpr uint8_t kCdcSetLineCoding = 0x20;
 constexpr uint8_t kCdcSetControlLineState = 0x22;
 constexpr uint16_t kCdcDtrRts = 0x03;
 
-constexpr int kBulkInSize = 512; // multiple of the 64-byte FS bulk MPS
+constexpr int kBulkInSize = 512; // a multiple of the bulk MPS at both full (64) and high (512) speed
 constexpr int kBulkInTransfers = 2;
 constexpr int kIsoTransfers = 4;
-constexpr int kIsoPacketsPerTransfer = 8; // 8 ms per transfer at FS
+// The M8's audio endpoints use bInterval 2: one packet per 250 us at high speed. 16 packets
+// make a 4 ms transfer; with 4 in flight there's 16 ms of slack for the client task.
+constexpr int kIsoPacketsPerTransfer = 16;
 constexpr int kOutMaxLen = 8;
 
-// If no device has enumerated for this long, power-cycle the root port. This is the host-side
-// equivalent of replugging: useful because the M8 powers this board through the same cable,
-// so it can't actually be unplugged without rebooting both.
+// If no device has enumerated for this long, power-cycle the root port: the host-side
+// equivalent of replugging, in case a device that attached during boot was missed.
 constexpr TickType_t kPortRetryInterval = pdMS_TO_TICKS(5000);
 
 struct OutMsg {
@@ -204,28 +198,14 @@ const char *speed_name(uint32_t spd) {
   return names[spd & 3];
 }
 
-void log_phy_routing() {
-#if CONFIG_IDF_TARGET_ESP32S3
-  usb_wrap_otg_conf_reg_t otg;
-  otg.val = USB_WRAP.otg_conf.val;
-  ESP_LOGI(TAG, "phy: rtc sw_hw_sel=%d sw_sel=%d | otg phy_sel=%d pad_en=%d pull_ovr=%d "
-                "dp_pu=%d dp_pd=%d dm_pu=%d dm_pd=%d",
-           (int)RTCCNTL.usb_conf.sw_hw_usb_phy_sel, (int)RTCCNTL.usb_conf.sw_usb_phy_sel,
-           (int)otg.phy_sel, (int)otg.pad_enable, (int)otg.pad_pull_override, (int)otg.dp_pullup,
-           (int)otg.dp_pulldown, (int)otg.dm_pullup, (int)otg.dm_pulldown);
-  ESP_LOGI(TAG, "phy: usb-serial-jtag pull_ovr=%d dp_pu=%d",
-           (int)RTCCNTL.usb_conf.usb_pad_pull_override, (int)RTCCNTL.usb_conf.usb_dp_pullup);
-#endif
-}
-
 // Logs the root port's state when power, device presence, enable or speed change. The line
 // state (D+/D-) is included for context but doesn't trigger a log line: it toggles constantly
-// once traffic is flowing. A full-speed device that is attached and pulling D+ up shows
-// "connected=1 lines=J" before enumeration.
+// once traffic is flowing. An attached device shows "connected=1" before enumeration, and the
+// M8 should then come up at speed=high.
 void watch_port() {
   static uint32_t last = UINT32_MAX;
   usb_dwc_hprt_reg_t hprt;
-  hprt.val = ROOT_PORT_DWC.hprt_reg.val;
+  hprt.val = USB_DWC_HS.hprt_reg.val; // the M8 is on the high-speed controller (USB-A)
 
   usb_dwc_hprt_reg_t key = {};
   key.prtpwr = hprt.prtpwr;
@@ -385,18 +365,29 @@ void log_descriptor_summary(const usb_config_desc_t *cfg) {
                USB_EP_DESC_GET_MPS(ep), ep->wMaxPacketSize, ep->bInterval, extra);
     } else if (intf && intf->bInterfaceClass == kClassAudio &&
                intf->bInterfaceSubClass == kSubclassAudioStreaming && b[1] == 0x24 && b[0] >= 3) {
-      if (b[2] == 0x01 && b[0] >= 7) { // AS_GENERAL
-        ESP_LOGI(TAG, "    AS general: terminal link %u, delay %u, format tag 0x%04X", b[3], b[4],
-                 b[5] | (b[6] << 8));
-      } else if (b[2] == 0x02 && b[0] >= 8 && b[3] == 0x01) { // FORMAT_TYPE I
+      const bool uac2 = intf->bInterfaceProtocol == 0x20;
+      if (b[2] == 0x01 && uac2 && b[0] >= 16) { // AS_GENERAL (UAC 2.0)
+        const unsigned long formats = b[6] | (b[7] << 8) | (b[8] << 16) | ((uint32_t)b[9] << 24);
+        const unsigned long channels =
+            b[11] | (b[12] << 8) | (b[13] << 16) | ((uint32_t)b[14] << 24);
+        ESP_LOGI(TAG, "    AS general (UAC2): terminal link %u, format type %u, formats 0x%08lX, "
+                      "%u ch, channel config 0x%08lX",
+                 b[3], b[5], formats, b[10], channels);
+      } else if (b[2] == 0x02 && uac2 && b[0] >= 6 && b[3] == 0x01) { // FORMAT_TYPE I (UAC 2.0)
+        ESP_LOGI(TAG, "    format (UAC2): %u-byte subslots, %u-bit; rate set by the clock source",
+                 b[4], b[5]);
+      } else if (b[2] == 0x01 && !uac2 && b[0] >= 7) { // AS_GENERAL (UAC 1.0)
+        ESP_LOGI(TAG, "    AS general (UAC1): terminal link %u, delay %u, format tag 0x%04X", b[3],
+                 b[4], b[5] | (b[6] << 8));
+      } else if (b[2] == 0x02 && !uac2 && b[0] >= 8 && b[3] == 0x01) { // FORMAT_TYPE I (UAC 1.0)
         char rates[64] = "";
         for (int i = 0; i < b[7] && 8 + i * 3 + 2 < b[0]; i++) {
           const uint32_t hz = b[8 + i * 3] | (b[9 + i * 3] << 8) | (b[10 + i * 3] << 16);
           snprintf(rates + strlen(rates), sizeof(rates) - strlen(rates), "%s%lu", i ? "," : "",
                    (unsigned long)hz);
         }
-        ESP_LOGI(TAG, "    format: %u ch, %u-byte subframes, %u-bit, rates %s Hz%s", b[4], b[5],
-                 b[6], rates, b[7] == 0 ? " (continuous)" : "");
+        ESP_LOGI(TAG, "    format (UAC1): %u ch, %u-byte subframes, %u-bit, rates %s Hz%s", b[4],
+                 b[5], b[6], rates, b[7] == 0 ? " (continuous)" : "");
       }
     }
   }
@@ -606,8 +597,6 @@ void client_task(void *) {
   ESP_ERROR_CHECK(usb_host_transfer_alloc(64, 0, &out_xfer));
   ESP_ERROR_CHECK(usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + 64, 0, &ctrl_xfer));
 
-  log_phy_routing();
-
   for (;;) {
     usb_host_client_handle_events(client, pdMS_TO_TICKS(20));
     watch_port();
@@ -639,14 +628,6 @@ bool start(StreamBufferHandle_t rx, AudioSink audio) {
   host_cfg.skip_phy_setup = false;
   host_cfg.intr_flags = ESP_INTR_FLAG_LEVEL1;
   host_cfg.enum_filter_cb = enum_filter_cb;
-#if CONFIG_IDF_TARGET_ESP32S3
-  // The S3's full-speed controller has a 256-line (4-byte) FIFO, and the prebuilt Arduino
-  // sdkconfig biases it towards periodic OUT. Favour IN traffic: isochronous audio and bulk.
-  // (The P4's high-speed controller has a much larger FIFO; its default split is fine.)
-  host_cfg.fifo_settings_custom.rx_fifo_lines = 136;  // 544 B: iso packets + status words
-  host_cfg.fifo_settings_custom.nptx_fifo_lines = 32; // 128 B: two 64 B bulk/control OUT packets
-  host_cfg.fifo_settings_custom.ptx_fifo_lines = 16;  // no periodic OUT endpoints in use
-#endif
   esp_err_t err = usb_host_install(&host_cfg);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "usb_host_install: %s", esp_err_to_name(err));

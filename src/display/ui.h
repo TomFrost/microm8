@@ -1,4 +1,4 @@
-// Owns the LCD. Composes the M8 framebuffer, the on-screen keypad and the status bar.
+// Owns the display. Composes the M8 framebuffer, the on-screen keypad and the status bar.
 // All functions must be called from the UI task.
 #pragma once
 
@@ -17,6 +17,7 @@ struct Status {
   bool oversized; // M8 resolution larger than the on-screen area
   bool headphones_available; // show the SPK/HP output toggle
   bool headphones;           // headphones are the selected output
+  int battery;               // percent, or -1 if unknown
 };
 
 bool begin();

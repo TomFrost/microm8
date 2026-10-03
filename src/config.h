@@ -1,12 +1,66 @@
-// Settings shared by all boards. Board-specific pins and layout live in
-// src/boards/<board>/board_config.h, selected by the PlatformIO environment.
+// microm8 configuration for the M5Stack Tab5 (ESP32-P4). Pins are from M5Stack's M5Unified
+// board support.
 #pragma once
 
 #include <stdint.h>
 
-#include "board_config.h"
+#define BOARD_NAME "M5Stack Tab5"
 
-// The M8 Headless draws a 320x240 screen. Boards may scale it up when presenting it.
+// ---------------------------------------------------------------------------
+// Display: 5" 720x1280 MIPI-DSI, used in portrait. Set -DTAB5_ROTATE_180=1 to flip it.
+//
+//   +----------------------+   y
+//   |  +----------------+  |   40
+//   |  |  M8 screen 2x  |  |
+//   |  |    640x480     |  |
+//   |  +----------------+  |   520
+//   |  status bar          |   544 .. 608
+//   |                      |
+//   |                      |
+//   |     ^      SHIFT PLAY|   968
+//   |  <  v  >   OPT   EDIT|   1104 .. 1232
+//   +----------------------+   1280
+// ---------------------------------------------------------------------------
+#define LCD_WIDTH 720
+#define LCD_HEIGHT 1280
+
+#define M8_SCALE 2
+#define M8_DRAW_X 40
+#define M8_DRAW_Y 40
+
+#define STATUS_X 0
+#define STATUS_Y 544
+#define STATUS_W LCD_WIDTH
+#define STATUS_H 64
+
+// Keypad (see keypad_layout.cpp): the M8's own arrangement, sized for thumbs.
+#define KEY_SIZE 128
+#define KEY_SPACING 8 // between keys in a group
+#define KEY_GROUP_GAP 24 // between the cursor keys and SHIFT/PLAY/OPTION/EDIT
+#define KEY_MARGIN 16 // left/right screen margin
+#define KEY_BOTTOM_MARGIN 48
+
+// ---------------------------------------------------------------------------
+// Audio: ES8388 codec (speaker amp + headphone jack) and ES7210 mic ADC share I2S0.
+// ---------------------------------------------------------------------------
+#define TAB5_I2S_MCLK 30
+#define TAB5_I2S_BCLK 27
+#define TAB5_I2S_WS 29
+#define TAB5_I2S_DOUT 26 // to ES8388
+#define TAB5_I2S_DIN 28  // from ES7210 (mics)
+
+#define TAB5_ES8388_ADDR 0x10
+#define TAB5_IOE0_ADDR 0x43 // PI4IOE5V6408: HP_DET (bit 7, input), SPK_EN (bit 1)
+
+// HP_DET's polarity isn't documented. Until it's confirmed on hardware, jack changes are only
+// logged. Once known, set -DTAB5_HP_DET_INSERTED_LEVEL=0 or 1 to switch outputs automatically.
+#ifndef TAB5_HP_DET_INSERTED_LEVEL
+#define TAB5_HP_DET_INSERTED_LEVEL -1
+#endif
+
+// ---------------------------------------------------------------------------
+// The M8 Headless draws a 320x240 screen; it's shown at M8_SCALE.
+// ---------------------------------------------------------------------------
 #define M8_SCREEN_W 320
 #define M8_SCREEN_H 240
 
