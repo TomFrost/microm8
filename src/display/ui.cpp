@@ -192,23 +192,6 @@ Source source() {
           h < M8_SCREEN_H ? h : M8_SCREEN_H};
 }
 
-// `n` scaled pixels along output row `oy`, from output column `ox` in steps of `step`.
-void span_along_row(uint16_t *dst, int n, const Source &s, int oy, int ox, int step) {
-  const int j0 = row_src[oy];
-  const int j1 = j0 + 1 < s.vis_h ? j0 + 1 : j0;
-  const int rw = row_wt[oy];
-  const uint16_t *s0 = s.px + j0 * s.stride;
-  const uint16_t *s1 = s.px + j1 * s.stride;
-  for (int k = 0; k < n; k++, ox += step) {
-    const int i0 = col_src[ox];
-    const int i1 = i0 + 1 < s.vis_w ? i0 + 1 : i0;
-    const int cw = col_wt[ox];
-    uint16_t p = blend565(s0[i0], s0[i1], cw);
-    if (rw < 256) p = blend565(p, blend565(s1[i0], s1[i1], cw), rw);
-    dst[k] = p;
-  }
-}
-
 // `n` scaled pixels along output column `ox`, from output row `oy` in steps of `step`.
 void span_along_col(uint16_t *dst, int n, const Source &s, int ox, int oy, int step) {
   const int i0 = col_src[ox];
@@ -338,26 +321,115 @@ NRect to_native(const Layout &l, const Rect &r) {
   }
 }
 
-// Scales panel rows [y0, y1), columns [x0, x0 + w), which must lie in the M8 rectangle, into
-// `dst` (w pixels per row).
-void render_native(uint16_t *dst, const Layout &l, const Source &s, int y0, int y1, int x0, int w) {
-  for (int ny = y0; ny < y1; ny++, dst += w) {
-    switch (nat.rot) { // output coordinates of the panel pixel (x0, ny), and the step along x
-    case 1:
-      span_along_col(dst, w, s, ny - l.m8.x, l.height - 1 - x0 - l.m8.y, -1);
-      break;
-    case 2:
-      span_along_row(dst, w, s, l.height - 1 - ny - l.m8.y, l.width - 1 - x0 - l.m8.x, -1);
-      break;
-    case 3:
-      span_along_col(dst, w, s, l.width - 1 - ny - l.m8.x, x0 - l.m8.y, 1);
-      break;
-    default:
-      span_along_row(dst, w, s, ny - l.m8.y, x0 - l.m8.x, 1);
-      break;
+// The scaler's hot loops, compiled for speed rather than the build's default (size).
+#pragma GCC push_options
+#pragma GCC optimize("O2")
+
+// A source line's pixels, each repeated k times (integer scaling): n output pixels from output
+// position `o` along the line, in steps of `step`. `pitch` is the distance between neighbouring
+// source pixels along the line (1 along a row, the row stride down a column).
+void replicate(uint16_t *dst, int n, const uint16_t *line, int pitch, int k, int o, int step) {
+  int i = o / k;
+  int left = step > 0 ? k - o % k : o % k + 1; // output pixels left from source pixel i
+  uint16_t p = line[i * pitch];
+  for (int t = 0; t < n; t++) {
+    if (!left) {
+      i += step;
+      p = line[i * pitch];
+      left = k;
     }
+    dst[t] = p;
+    left--;
   }
 }
+
+// Source row j scaled horizontally only: n output pixels from output column `ox`, in steps
+// of `step`.
+void scale_row_h(uint16_t *dst, int n, const Source &s, int j, int ox, int step) {
+  const uint16_t *row = s.px + j * s.stride;
+  for (int t = 0; t < n; t++, ox += step) {
+    const int i0 = col_src[ox];
+    const int i1 = i0 + 1 < s.vis_w ? i0 + 1 : i0;
+    dst[t] = blend565(row[i0], row[i1], col_wt[ox]);
+  }
+}
+
+int int_scale; // k when the M8 rectangle is exactly k times the M8 screen on both axes, else 0
+
+// Scales panel rows [y0, y1), columns [x0, x0 + w), which must lie in the M8 rectangle, into
+// `dst` (w pixels per row).
+//
+// Each panel row is one output row (rotations 0 and 2) or one output column (1 and 3), so
+// consecutive panel rows that sample the same source line unblended are identical and are
+// copied rather than rescaled. With integer scaling there's no blending at all; otherwise,
+// along rows, each source row is scaled horizontally once and output rows blend two of those.
+void render_native(uint16_t *dst, const Layout &l, const Source &s, int y0, int y1, int x0, int w) {
+  static uint16_t hline[2][LAND_M8_W > PORT_M8_W ? LAND_M8_W : PORT_M8_W];
+  int hline_src[2] = {-1, -1}; // source row in each, for this call's x0, w and step
+  auto scaled = [&](int j, int o0, int step) -> const uint16_t * {
+    const int slot = j & 1; // j and j + 1, blended together, never share a slot
+    if (hline_src[slot] != j) {
+      scale_row_h(hline[slot], w, s, j, o0, step);
+      hline_src[slot] = j;
+    }
+    return hline[slot];
+  };
+
+  const bool along_row = !(nat.rot & 1);
+  const int k = int_scale;
+  int prev_key = -1;
+  const uint16_t *prev = nullptr;
+  for (int ny = y0; ny < y1; ny++, dst += w) {
+    // `fixed`: this panel row's output row or column; o0 and step: the other axis along it.
+    int fixed, o0, step;
+    switch (nat.rot) {
+    case 1:
+      fixed = ny - l.m8.x, o0 = l.height - 1 - x0 - l.m8.y, step = -1;
+      break;
+    case 2:
+      fixed = l.height - 1 - ny - l.m8.y, o0 = l.width - 1 - x0 - l.m8.x, step = -1;
+      break;
+    case 3:
+      fixed = l.width - 1 - ny - l.m8.x, o0 = x0 - l.m8.y, step = 1;
+      break;
+    default:
+      fixed = ny - l.m8.y, o0 = x0 - l.m8.x, step = 1;
+      break;
+    }
+
+    // The source line this row samples, if it samples just one, unblended.
+    int key = -1;
+    if (k) {
+      key = fixed / k;
+    } else if ((along_row ? row_wt : col_wt)[fixed] >= 256) {
+      key = (along_row ? row_src : col_src)[fixed];
+    }
+    if (key >= 0 && key == prev_key) {
+      memcpy(dst, prev, w * sizeof(uint16_t));
+    } else if (k) {
+      if (along_row) {
+        replicate(dst, w, s.px + key * s.stride, 1, k, o0, step);
+      } else {
+        replicate(dst, w, s.px + key, s.stride, k, o0, step);
+      }
+    } else if (along_row) {
+      const int j0 = row_src[fixed], rw = row_wt[fixed];
+      const uint16_t *h0 = scaled(j0, o0, step);
+      if (rw >= 256) {
+        memcpy(dst, h0, w * sizeof(uint16_t));
+      } else {
+        const uint16_t *h1 = scaled(j0 + 1 < s.vis_h ? j0 + 1 : j0, o0, step);
+        for (int t = 0; t < w; t++) dst[t] = blend565(h0[t], h1[t], rw);
+      }
+    } else {
+      span_along_col(dst, w, s, fixed, o0, step);
+    }
+    prev_key = key;
+    prev = dst;
+  }
+}
+
+#pragma GCC pop_options
 
 // What flush_m8() has done, for log_display_stats().
 struct {
@@ -934,6 +1006,9 @@ void apply_layout(Orientation o) {
   nat.rot = (d.getRotation() + d.getPanel()->config().offset_rotation) & 3;
   build_axis(col_src, col_wt, l.m8.w, M8_SCREEN_W);
   build_axis(row_src, row_wt, l.m8.h, M8_SCREEN_H);
+  const bool exact = l.m8.w % M8_SCREEN_W == 0 && l.m8.h % M8_SCREEN_H == 0 &&
+                     l.m8.w / M8_SCREEN_W == l.m8.h / M8_SCREEN_H;
+  int_scale = exact ? l.m8.w / M8_SCREEN_W : 0;
 
   d.fillScreen(kBg);
   status_drawn = false;
