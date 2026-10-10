@@ -77,8 +77,8 @@ pio test -e native
 | `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
 | `src/display/ui.cpp` | Portrait layout through M5GFX: scales changed bands 2× to the display at up to 60 Hz, draws the keypad and status bar. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
 | `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and key hit-testing. Produces the M8 key bitmask (`'C'` + mask). |
-| `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), per-output volume, mono mix for the speaker. |
-| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0, speaker amp enable, headphone detect. |
+| `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), a silence gate so the codec goes quiet between songs, per-output volume levels, mono mix for the speaker. |
+| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. |
 | `src/board.cpp` | M5Unified bring-up, USB-A 5 V, battery gauge, and the lock for the shared internal I2C bus. |
 
 FreeRTOS tasks: USB and audio run on core 0; display and touch run on core 1. Serial data
