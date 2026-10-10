@@ -5,6 +5,7 @@
 
 #include <M5Unified.h>
 #include <driver/temperature_sensor.h>
+#include <esp_system.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -20,6 +21,7 @@ namespace {
 constexpr uint32_t kI2cHz = 400000;
 constexpr uint8_t kIoeOutputReg = 0x05;
 constexpr uint32_t kBatteryRefreshMs = 500;
+constexpr uint32_t kM8PowerOffMs = 500; // long enough for the Teensy to drop out
 
 SemaphoreHandle_t i2c_mutex; // created in begin(), before anything takes the lock
 temperature_sensor_handle_t tsens;
@@ -146,7 +148,7 @@ bool begin() {
   cfg.clear_display = true;
   cfg.internal_spk = false; // audio_hw.cpp owns I2S0 and the ES8388
   cfg.internal_mic = false;
-  cfg.internal_imu = false;
+  cfg.internal_imu = true; // BMI270, for screen orientation
   {
     I2CLock lock;
     M5.begin(cfg);
@@ -157,8 +159,21 @@ bool begin() {
   switch_off("C6 wireless", TAB5_IOE1_ADDR, TAB5_IOE1_WLAN_PWR_EN);
   switch_off("camera", TAB5_IOE0_ADDR, TAB5_IOE0_CAM_RST);
 
+  // A reset (after flashing, the reset button, a crash) restarts only the P4: the I/O expanders
+  // keep USB-A powered, so the M8 would run on with its USB session to the old firmware.
+  // Power-cycle it, so it starts fresh as on a cold boot. (The codec also runs on through a
+  // reset; audio_hw::begin() restarts it.)
+  const esp_reset_reason_t reset = esp_reset_reason();
+  if (reset != ESP_RST_POWERON) {
+    ESP_LOGI(TAG, "reset (reason %d), not power-on: power-cycling the M8", (int)reset);
+    {
+      I2CLock lock;
+      M5.Power.setExtOutput(false, m5::ext_port_mask_t::ext_USB);
+    }
+    vTaskDelay(pdMS_TO_TICKS(kM8PowerOffMs));
+  }
   {
-    // 5 V on the USB-A host port powers the M8 (Teensy). It is off after reset.
+    // 5 V on the USB-A host port powers the M8 (Teensy).
     I2CLock lock;
     M5.Power.setExtOutput(true, m5::ext_port_mask_t::ext_USB);
   }
@@ -169,9 +184,9 @@ bool begin() {
     tsens = nullptr;
   }
 
-  ESP_LOGI(TAG, "display %dx%d, touch %s, USB-A power %s", M5.Display.width(),
+  ESP_LOGI(TAG, "display %dx%d, touch %s, IMU %s, USB-A power %s", M5.Display.width(),
            M5.Display.height(), M5.Touch.isEnabled() ? "ok" : "missing",
-           M5.Power.getExtOutput() ? "on" : "off");
+           M5.Imu.isEnabled() ? "ok" : "missing", M5.Power.getExtOutput() ? "on" : "off");
   return true;
 }
 
@@ -200,6 +215,13 @@ bool battery_present() {
 int power_draw_mw() {
   refresh_battery();
   return battery.load_mw;
+}
+
+bool accel(float *x, float *y, float *z) {
+  if (!M5.Imu.isEnabled()) return false;
+  I2CLock lock;
+  M5.Imu.update();
+  return M5.Imu.getAccel(x, y, z);
 }
 
 void log_power() {

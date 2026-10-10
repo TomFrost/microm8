@@ -39,5 +39,7 @@ const uint16_t *framebuffer();
 // Returns the bitmask of row bands (kBandRows rows each) touched since the last call.
 uint64_t take_dirty_bands();
 void mark_all_dirty();
+// Marks framebuffer rows [y0, y1) for redraw, e.g. under an overlay that changed.
+void mark_dirty(int y0, int y1);
 
 } // namespace m8screen

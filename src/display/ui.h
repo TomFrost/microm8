@@ -1,6 +1,7 @@
-// Owns the display. Composes the M8 framebuffer, the on-screen keypad, the status bar and the
-// volume/brightness slider row. All drawing functions must be called from the UI task;
-// hit_test() is safe from any task.
+// Owns the display: the scaled M8 framebuffer, the on-screen keys, the status icons and the
+// row of controls (volume/brightness sliders, power details), in portrait or landscape. All
+// functions must be called from the UI task, except hit_test(), slider_value(),
+// in_swipe_area() and arrow_at(), which are safe from any task.
 #pragma once
 
 #include <stdint.h>
@@ -8,6 +9,9 @@
 #include "diag/log_capture.h"
 
 namespace ui {
+
+// Screen orientation. Values are quarter turns clockwise from portrait.
+enum class Orientation : uint8_t { kPortrait, kLandscape, kPortraitFlipped, kLandscapeFlipped };
 
 // Which row is open under the status bar: a slider, or battery details.
 enum class Popup : uint8_t { kNone, kVolume, kBrightness, kPower };
@@ -31,25 +35,34 @@ struct Status {
   PowerSource power;
   int battery;  // percent, or -1 if unknown
   int power_mw; // load in mW, shown for power diagnostics; -1 hides it
+  bool rotation_locked;
+  const char *message; // shown in place of the connection text when set (portrait)
 };
 
-// Contents of the row under the status bar.
+// Contents of the row under the status bar (portrait), or of the panel in the left margin
+// (landscape).
 struct Controls {
   Popup popup;
   int volume;
   bool headphones;
   int brightness; // kBrightnessMin..kBrightnessMax
   PowerSource power;
-  int battery; // percent, or -1 if unknown
+  int battery;         // percent, or -1 if unknown
+  const char *message; // landscape: shown in the panel while no row is open
+  uint8_t arrows;      // landscape: arrow keys held, lit on the panel's arrow pad
 };
 
-bool begin();
+bool begin(Orientation orientation);
 void set_backlight(uint8_t level);
+
+// Rotates the display and redraws everything for the new layout.
+void set_orientation(Orientation orientation);
+Orientation orientation();
 
 // Brightness level (kBrightnessMin..kBrightnessMax) to backlight PWM level.
 uint8_t backlight_for(int brightness);
 
-// Copies changed rows of the M8 framebuffer to the LCD.
+// Draws changed rows of the M8 framebuffer, scaled.
 void flush_m8();
 
 // Redraws keys whose pressed state changed (or all, if `force`).
@@ -71,10 +84,23 @@ enum class Hit : uint8_t {
   kNone,
   kVolumeIcon,
   kBrightnessIcon,
+  kRotationIcon,
   kPowerIcon,
   kOutputToggle,
   kSlider,
 };
 Hit hit_test(int x, int y, Popup open, int *value);
+
+// The level of the open slider for a finger at (x, y) anywhere on the screen: its position
+// along the slider's axis, clamped to the ends. For a finger dragging a slider it has grabbed.
+int slider_value(int x, int y, Popup open);
+
+// True where a touch that isn't on a key or a status/row target starts a swipe (landscape's
+// left half; nowhere in portrait).
+bool in_swipe_area(int x, int y);
+
+// The arrow key under (x, y) on the landscape panel's arrow pad, or 0 (also while the panel
+// shows something else).
+uint8_t arrow_at(int x, int y);
 
 } // namespace ui

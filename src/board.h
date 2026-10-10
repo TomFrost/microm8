@@ -28,6 +28,9 @@ bool battery_present();
 // doesn't reflect the load). Cheap to call often.
 int power_draw_mw();
 
+// Accelerometer reading in g, in the BMI270's own axes. False if the IMU isn't available.
+bool accel(float *x, float *y, float *z);
+
 // Logs battery voltage, current, power and the P4's temperature.
 void log_power();
 

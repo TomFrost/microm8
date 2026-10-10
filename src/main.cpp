@@ -11,6 +11,7 @@
 #include <atomic>
 #include <esp_log.h>
 #include <freertos/stream_buffer.h>
+#include <math.h>
 
 #include "audio/audio_hw.h"
 #include "audio/audio_out.h"
@@ -33,7 +34,16 @@ constexpr uint32_t kFrameIntervalMs = 16; // cap LCD updates at ~60 Hz
 constexpr uint32_t kSettingsSaveDelayMs = 2000;
 constexpr uint32_t kJackDebounceMs = 100;
 constexpr uint32_t kPowerLogIntervalMs = 10000;
+constexpr uint32_t kAudioLogIntervalMs = 5000; // audio path report, for a while after connecting
+constexpr uint32_t kAudioLogForMs = 30000;
 constexpr uint32_t kPopupTimeoutMs = 4000; // the row under the status bar closes after this
+constexpr uint32_t kMessageMs = 2000;      // transient status messages
+constexpr uint32_t kOrientationPollMs = 100;
+constexpr uint32_t kOrientationDwellMs = 700; // a new orientation must hold this long
+// Gravity must lie mostly in the screen's plane, and clearly along one of its axes, to count:
+// flat on a table or held diagonally, the orientation stays as it is.
+constexpr float kMinInPlaneG = 0.55f;
+constexpr float kMinAxisMarginG = 0.25f;
 
 StreamBufferHandle_t rx_stream;
 Preferences prefs;
@@ -44,6 +54,11 @@ std::atomic<bool> settings_changed{false};
 std::atomic<ui::Popup> popup{ui::Popup::kNone};
 std::atomic<uint32_t> popup_touched_at{0};
 std::atomic<int> brightness{ui::kBrightnessMax};
+std::atomic<bool> rotation_locked{false};
+std::atomic<uint32_t> message_at{0}; // when the rotation lock was last toggled
+
+constexpr uint8_t kArrowKeys = m8proto::kKeyUp | m8proto::kKeyDown | m8proto::kKeyLeft |
+                               m8proto::kKeyRight;
 
 void send_cmd(uint8_t cmd) { m8usb::send(&cmd, 1); }
 
@@ -52,6 +67,45 @@ void save_settings() {
   prefs.putUChar("vol_hp", (uint8_t)audio::volume_for(audio::Output::kHeadphones));
   prefs.putUChar("output", (uint8_t)audio::output());
   prefs.putUChar("bright", (uint8_t)brightness.load());
+  prefs.putUChar("rot_lock", rotation_locked ? 1 : 0);
+  prefs.putUChar("orient", (uint8_t)ui::orientation());
+}
+
+// The orientation gravity points to, or -1 if the Tab5 is flat or held diagonally.
+int sensed_orientation(float ax, float ay, float az) {
+  const float gx = fabsf(ax), gy = fabsf(ay);
+  if ((gx > gy ? gx : gy) < kMinInPlaneG || fabsf(gx - gy) < kMinAxisMarginG) return -1;
+  if (gx > gy) return ax > 0 ? TAB5_GRAVITY_POS_X : TAB5_GRAVITY_NEG_X;
+  return ay > 0 ? TAB5_GRAVITY_POS_Y : TAB5_GRAVITY_NEG_Y;
+}
+
+// Follows the accelerometer while rotation is unlocked. Returns true if the orientation changed.
+bool poll_orientation(uint32_t now) {
+  static uint32_t polled_at = 0;
+  static int candidate = -1;
+  static uint32_t candidate_since = 0;
+
+  if (rotation_locked || now - polled_at < kOrientationPollMs) return false;
+  polled_at = now;
+  float ax, ay, az;
+  if (!board::accel(&ax, &ay, &az)) return false;
+
+  const int o = sensed_orientation(ax, ay, az);
+  if (o < 0 || o == (int)ui::orientation()) {
+    candidate = -1;
+    return false;
+  }
+  if (o != candidate) {
+    candidate = o;
+    candidate_since = now;
+    return false;
+  }
+  if (now - candidate_since < kOrientationDwellMs) return false;
+
+  ESP_LOGI(TAG, "orientation: accel %+.2f %+.2f %+.2f g -> %d", ax, ay, az, o);
+  candidate = -1;
+  ui::set_orientation((ui::Orientation)o);
+  return true;
 }
 
 // Switches to headphones when a plug goes in and back to the speaker when it comes out.
@@ -75,6 +129,23 @@ void poll_jack_detect(uint32_t now) {
   if (first && !inserted) return; // keep the saved choice at boot if nothing is plugged in
   audio::set_output(inserted ? audio::Output::kHeadphones : audio::Output::kSpeaker);
   settings_changed = true;
+}
+
+// Reports how far audio is getting: USB packets in, the loudest sample received, and the
+// playback buffer. Logged every few seconds for a while after the M8 connects.
+void log_audio(uint32_t now, uint32_t connected_at) {
+  static uint32_t logged_at = 0;
+  if (!connected_at || now - connected_at > kAudioLogForMs) return;
+  if (now - logged_at < kAudioLogIntervalMs) return;
+  logged_at = now;
+  const m8usb::AudioStats a = m8usb::audio_stats();
+  ESP_LOGI(TAG,
+           "audio: USB %lu packets ok, %lu empty, %lu failed (last status %d), %lu bytes; "
+           "loudest sample %d; buffered %lu ms; %lu underruns",
+           (unsigned long)a.packets_ok, (unsigned long)a.packets_empty,
+           (unsigned long)a.packets_failed, a.last_packet_status, (unsigned long)a.bytes,
+           audio::take_peak(), (unsigned long)audio::buffered_ms(),
+           (unsigned long)audio::underruns());
 }
 
 ui::Status::Link link_for(m8usb::State s) {
@@ -113,6 +184,7 @@ void ui_task(void *) {
   uint32_t second_reset_at = 0;
   uint32_t settings_dirty_since = 0;
   uint32_t last_power_log = 0;
+  uint32_t connected_at = 0;
   int applied_brightness = -1;
   uint32_t shown_log_version = logcap::version() - 1; // draw the log on the first frame
 
@@ -136,6 +208,7 @@ void ui_task(void *) {
     const uint32_t connections = m8usb::connection_count();
     if (connections != seen_connections) {
       seen_connections = connections;
+      connected_at = now ? now : 1;
       m8proto::reset();
       m8screen::clear({0, 0, 0});
       send_cmd(m8proto::kCmdEnableDisplay);
@@ -158,11 +231,14 @@ void ui_task(void *) {
     }
 
     poll_jack_detect(now);
+    log_audio(now, connected_at);
+    if (poll_orientation(now)) settings_changed = true;
     if (brightness != applied_brightness) {
       applied_brightness = brightness;
       ui::set_backlight(ui::backlight_for(applied_brightness));
     }
-    if (popup != ui::Popup::kNone && now - popup_touched_at > kPopupTimeoutMs) {
+    // Signed: the touch task may have stamped a time a little after `now`.
+    if (popup != ui::Popup::kNone && (int32_t)(now - popup_touched_at) > (int32_t)kPopupTimeoutMs) {
       popup = ui::Popup::kNone;
     }
 #if MICROM8_POWER_DIAG
@@ -187,8 +263,8 @@ void ui_task(void *) {
         ui::show_log(lines, logcap::copy_lines(lines, logcap::kLines));
       }
 
-      ui::flush_m8();
-      ui::draw_keys(held_keys.load());
+      const uint8_t held = held_keys;
+      ui::draw_keys(held);
 
       const m8proto::DeviceInfo &info = m8proto::device_info();
       ui::Status st{};
@@ -208,7 +284,11 @@ void ui_task(void *) {
                                             : ui::PowerSource::kBattery;
       st.battery = board::battery_percent();
       st.power_mw = MICROM8_POWER_DIAG ? board::power_draw_mw() : -1;
-      ui::draw_status(st);
+      st.rotation_locked = rotation_locked;
+      const uint32_t message_since = message_at;
+      if (message_since && (int32_t)(now - message_since) < (int32_t)kMessageMs) {
+        st.message = st.rotation_locked ? "Rotation locked" : "Rotation enabled";
+      }
 
       ui::Controls controls{};
       controls.popup = popup;
@@ -217,57 +297,207 @@ void ui_task(void *) {
       controls.brightness = brightness;
       controls.power = st.power;
       controls.battery = st.battery;
+      controls.message = st.message;
+      controls.arrows = held & kArrowKeys;
       ui::draw_controls(controls);
+
+      ui::flush_m8();
+      ui::draw_status(st);
     }
   }
+}
+
+// Touch handling. Each finger gets a role when it lands, and keeps it until it lifts:
+// - on a status icon or row button: acts once, then is ignored;
+// - on a slider: drags it, following the finger's position along the slider's axis anywhere
+//   on the screen (so the thumb can move off the slider to uncover the knob);
+// - on the landscape arrow pad: holds the arrow under it, like a key;
+// - in the swipe area (landscape's left half) but not on a key: an arrow swipe, holding that
+//   arrow from when the swipe is recognised until the finger lifts;
+// - anywhere else: presses whichever key it's over, so fingers can slide between keys.
+enum class Role : uint8_t { kIgnore, kKeys, kSlider, kSwipe, kPad };
+
+struct Finger {
+  bool down;
+  uint8_t id;
+  Role role;
+  int16_t x0, y0;   // where it landed
+  ui::Popup slider; // kSlider: the row whose slider it grabbed
+  uint8_t arrow;    // kSwipe: the arrow held, once recognised
+  uint32_t arrow_at;
+};
+
+// The arrow for a swipe by (dx, dy), or 0 while it's too short or too diagonal to tell.
+uint8_t swipe_arrow(int dx, int dy) {
+  const int ax = abs(dx), ay = abs(dy);
+  const int major = ax > ay ? ax : ay, minor = ax > ay ? ay : ax;
+  if (major < SWIPE_DISTANCE || major * 2 < minor * 3) return 0;
+  if (ax > ay) return dx > 0 ? m8proto::kKeyRight : m8proto::kKeyLeft;
+  return dy > 0 ? m8proto::kKeyDown : m8proto::kKeyUp;
+}
+
+void set_slider(ui::Popup row, int value) {
+  if (row == ui::Popup::kVolume && value != audio::volume()) {
+    audio::set_volume(value);
+    settings_changed = true;
+  } else if (row == ui::Popup::kBrightness && value != brightness) {
+    brightness = value;
+    settings_changed = true;
+  }
+}
+
+// A finger has landed: act on any target under it and give it its role.
+void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
+  const ui::Popup open = popup;
+  f = Finger{true, p.id, Role::kIgnore, p.x, p.y, open, 0, 0};
+  int value = 0;
+  const ui::Hit hit = ui::hit_test(p.x, p.y, open, &value);
+  if (hit != ui::Hit::kNone) popup_touched_at = now; // keeps the row open
+
+  switch (hit) {
+  case ui::Hit::kVolumeIcon:
+    popup = open == ui::Popup::kVolume ? ui::Popup::kNone : ui::Popup::kVolume;
+    break;
+  case ui::Hit::kBrightnessIcon:
+    popup = open == ui::Popup::kBrightness ? ui::Popup::kNone : ui::Popup::kBrightness;
+    break;
+  case ui::Hit::kPowerIcon:
+    popup = open == ui::Popup::kPower ? ui::Popup::kNone : ui::Popup::kPower;
+    break;
+  case ui::Hit::kRotationIcon:
+    rotation_locked = !rotation_locked;
+    message_at = now ? now : 1;
+    settings_changed = true;
+    break;
+  case ui::Hit::kOutputToggle:
+    audio::set_output(audio::output() == audio::Output::kSpeaker ? audio::Output::kHeadphones
+                                                                 : audio::Output::kSpeaker);
+    settings_changed = true;
+    break;
+  case ui::Hit::kSlider:
+    f.role = Role::kSlider;
+    set_slider(open, value);
+    break;
+  case ui::Hit::kNone:
+    if (keypad::mask_for(&p, 1)) {
+      f.role = Role::kKeys;
+    } else if (ui::arrow_at(p.x, p.y)) {
+      f.role = Role::kPad;
+    } else {
+      f.role = ui::in_swipe_area(p.x, p.y) ? Role::kSwipe : Role::kKeys;
+    }
+    break;
+  }
+}
+
+// Turns held arrows into taps at microm8's repeat rate (see ARROW_REPEAT_MS in config.h).
+// `mask` is the keys held on screen; returns what the M8 should see.
+uint8_t repeat_arrows(uint8_t mask, uint32_t now) {
+#if ARROW_REPEAT_MS == 0
+  (void)now;
+  return mask;
+#else
+  static uint8_t held = 0;
+  static uint32_t held_since[8];
+  uint8_t out = mask & ~kArrowKeys;
+  for (int b = 0; b < 8; b++) {
+    const uint8_t bit = (uint8_t)(1 << b);
+    if (!(kArrowKeys & bit)) continue;
+    if (!(mask & bit)) {
+      held &= ~bit;
+      continue;
+    }
+    if (!(held & bit)) {
+      held |= bit;
+      held_since[b] = now;
+    }
+    if (mask & m8proto::kKeySelect) { // SHIFT + arrow: screen navigation, held as is
+      out |= bit;
+      continue;
+    }
+    const uint32_t t = now - held_since[b];
+    const bool tap = t < ARROW_REPEAT_DELAY_MS
+                         ? t < ARROW_TAP_MS
+                         : (t - ARROW_REPEAT_DELAY_MS) % ARROW_REPEAT_MS < ARROW_TAP_MS;
+    if (tap) out |= bit;
+  }
+  return out;
+#endif
 }
 
 void touch_task(void *) {
   touch::Point points[touch::kMaxPoints];
   int count = 0;
+  Finger fingers[touch::kMaxPoints] = {};
   uint8_t mask = 0;
   uint8_t sent_mask = 0;
+  uint8_t flicked = 0; // arrows from swipes that already lifted, held for SWIPE_MIN_HOLD_MS
+  uint32_t flicked_until = 0;
   uint32_t seen_connections = 0;
-  ui::Hit prev_hit = ui::Hit::kNone;
 
   for (;;) {
     if (touch::read(points, &count)) {
-      mask = keypad::mask_for(points, count);
+      const uint32_t now = millis();
+      bool seen[touch::kMaxPoints] = {};
+      touch::Point key_points[touch::kMaxPoints];
+      int key_count = 0;
+      uint8_t arrows = 0;
+
+      for (int i = 0; i < count; i++) {
+        const touch::Point &p = points[i];
+        int slot = -1;
+        for (int j = 0; j < touch::kMaxPoints && slot < 0; j++) {
+          if (fingers[j].down && fingers[j].id == p.id) slot = j;
+        }
+        if (slot < 0) {
+          for (int j = 0; j < touch::kMaxPoints && slot < 0; j++) {
+            if (!fingers[j].down) slot = j;
+          }
+          if (slot < 0) continue;
+          finger_down(fingers[slot], p, now);
+        }
+        seen[slot] = true;
+
+        Finger &f = fingers[slot];
+        switch (f.role) {
+        case Role::kKeys:
+          key_points[key_count++] = p;
+          break;
+        case Role::kSlider:
+          if (f.slider == popup) {
+            popup_touched_at = now; // the row stays open while its slider is held
+            set_slider(f.slider, ui::slider_value(p.x, p.y, f.slider));
+          }
+          break;
+        case Role::kPad:
+          arrows |= ui::arrow_at(p.x, p.y);
+          break;
+        case Role::kSwipe:
+          if (!f.arrow) {
+            f.arrow = swipe_arrow(p.x - f.x0, p.y - f.y0);
+            f.arrow_at = now;
+          }
+          arrows |= f.arrow;
+          break;
+        case Role::kIgnore:
+          break;
+        }
+      }
+
+      // Lifted fingers. A quick flick still holds its arrow long enough to reach the M8.
+      for (int j = 0; j < touch::kMaxPoints; j++) {
+        Finger &f = fingers[j];
+        if (!f.down || seen[j]) continue;
+        f.down = false;
+        if (f.role == Role::kSwipe && f.arrow && now - f.arrow_at < SWIPE_MIN_HOLD_MS) {
+          flicked |= f.arrow;
+          flicked_until = f.arrow_at + SWIPE_MIN_HOLD_MS;
+        }
+      }
+      if (flicked && (int32_t)(now - flicked_until) >= 0) flicked = 0;
+
+      mask = keypad::mask_for(key_points, key_count) | arrows | flicked;
       held_keys = mask;
-
-      // Status bar and slider row: the first touch landing on a target wins.
-      const ui::Popup open = popup;
-      ui::Hit hit = ui::Hit::kNone;
-      int value = 0;
-      for (int i = 0; i < count && hit == ui::Hit::kNone; i++) {
-        hit = ui::hit_test(points[i].x, points[i].y, open, &value);
-      }
-      if (hit != ui::Hit::kNone) popup_touched_at = millis(); // keeps the row open
-
-      // Buttons act once per press; sliders follow the finger.
-      if (hit != prev_hit) {
-        if (hit == ui::Hit::kVolumeIcon) {
-          popup = open == ui::Popup::kVolume ? ui::Popup::kNone : ui::Popup::kVolume;
-        } else if (hit == ui::Hit::kBrightnessIcon) {
-          popup = open == ui::Popup::kBrightness ? ui::Popup::kNone : ui::Popup::kBrightness;
-        } else if (hit == ui::Hit::kPowerIcon) {
-          popup = open == ui::Popup::kPower ? ui::Popup::kNone : ui::Popup::kPower;
-        } else if (hit == ui::Hit::kOutputToggle) {
-          audio::set_output(audio::output() == audio::Output::kSpeaker ? audio::Output::kHeadphones
-                                                                       : audio::Output::kSpeaker);
-          settings_changed = true;
-        }
-      }
-      if (hit == ui::Hit::kSlider) {
-        if (open == ui::Popup::kVolume && value != audio::volume()) {
-          audio::set_volume(value);
-          settings_changed = true;
-        } else if (open == ui::Popup::kBrightness && value != brightness) {
-          brightness = value;
-          settings_changed = true;
-        }
-      }
-      prev_hit = hit;
     }
 
     // The M8 starts with no keys held after a (re)connect.
@@ -277,9 +507,10 @@ void touch_task(void *) {
       sent_mask = 0;
     }
 
-    if (mask != sent_mask && m8usb::state() == m8usb::State::kConnected) {
-      const uint8_t msg[2] = {m8proto::kCmdController, mask};
-      if (m8usb::send(msg, sizeof(msg))) sent_mask = mask; // retried next poll if the queue is full
+    const uint8_t out = repeat_arrows(mask, millis());
+    if (out != sent_mask && m8usb::state() == m8usb::State::kConnected) {
+      const uint8_t msg[2] = {m8proto::kCmdController, out};
+      if (m8usb::send(msg, sizeof(msg))) sent_mask = out; // retried next poll if the queue is full
     }
 
     vTaskDelay(pdMS_TO_TICKS(5));
@@ -305,11 +536,16 @@ void setup() {
   brightness = saved_brightness < ui::kBrightnessMin || saved_brightness > ui::kBrightnessMax
                    ? ui::kBrightnessMax
                    : saved_brightness;
+  rotation_locked = prefs.getUChar("rot_lock", 0) != 0;
+  const int saved_orientation = prefs.getUChar("orient", 0);
+  const auto orientation = saved_orientation <= (int)ui::Orientation::kLandscapeFlipped
+                               ? (ui::Orientation)saved_orientation
+                               : ui::Orientation::kPortrait;
 
   if (!m8screen::init()) ESP_LOGE(TAG, "framebuffer init failed");
   m8proto::init();
 
-  if (!ui::begin()) ESP_LOGE(TAG, "display init failed");
+  if (!ui::begin(orientation)) ESP_LOGE(TAG, "display init failed");
   const bool touch_ok = touch::begin();
   if (!touch_ok) ESP_LOGE(TAG, "touch init failed; on-screen keys disabled");
   if (!audio::start(speaker_volume, headphone_volume, output)) {

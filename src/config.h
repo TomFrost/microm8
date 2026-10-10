@@ -7,46 +7,77 @@
 #define BOARD_NAME "M5Stack Tab5"
 
 // ---------------------------------------------------------------------------
-// Display: 5" 720x1280 MIPI-DSI, used in portrait. Set -DTAB5_ROTATE_180=1 to flip it.
+// Display: 5" 720x1280 MIPI-DSI. Portrait or landscape, following the accelerometer unless
+// rotation is locked. Set -DTAB5_ROTATE_180=1 if portrait comes up upside down.
 //
-//   +----------------------+   y
-//   |  +----------------+  |   40
-//   |  |  M8 screen 2x  |  |
-//   |  |    640x480     |  |
-//   |  +----------------+  |   520
-//   |  status bar          |   544 .. 608
-//   |  (slider row)        |   614 .. 690, when open
-//   |          OPT  EDIT   |   708
-//   |      ^               |
-//   |  <   v   >           |
-//   |                      |
-//   |     SHIFT PLAY       |   .. 1232
-//   +----------------------+   1280
+// Portrait (720x1280)                    Landscape (1280x720)
+//   M8 screen 720x540 (2.25x) at top       M8 screen 960x720 (3x), centred
+//   status bar          548..612           left margin: icons, then a panel (vertical slider,
+//   slider/info row     616..692             power details, swipe hint), then SHIFT
+//   keypad (M8 layout)  ..1240             right margin: EDIT, OPTION, PLAY, SHIFT
+//                                          arrows: swipes on the left half of the screen
 // ---------------------------------------------------------------------------
-#define LCD_WIDTH 720
+#define LCD_WIDTH 720 // portrait
 #define LCD_HEIGHT 1280
 
-#define M8_SCALE 2
-#define M8_DRAW_X 40
-#define M8_DRAW_Y 40
+#define PORT_M8_X 0
+#define PORT_M8_Y 0
+#define PORT_M8_W 720
+#define PORT_M8_H 540
+#define PORT_STATUS_Y 548
+#define PORT_STATUS_H 64
+#define PORT_ROW_Y 616 // must end above the keypad's hit rects (OPTION/EDIT's start at y 704)
+#define PORT_ROW_H 76
 
-#define STATUS_X 0
-#define STATUS_Y 544
-#define STATUS_W LCD_WIDTH
-#define STATUS_H 64
-
-// Slider row for volume or brightness, shown in the gap between the status bar and the keypad
-// when its status-bar icon is tapped. Must end above the keypad's hit rects (OPTION/EDIT's
-// start at y = 696).
-#define CONTROLS_Y 614
-#define CONTROLS_H 76
-
-// Keypad (see keypad_layout.cpp): the M8's own arrangement on a regular grid, with OPTION/EDIT
-// shifted up and right, and SHIFT/PLAY down, by KEY_OFFSET. Proportions follow the M8.
+// Portrait keypad (see keypad_layout.cpp): the M8's own arrangement on a regular grid, with
+// OPTION/EDIT shifted up and right, and SHIFT/PLAY down, by KEY_OFFSET.
 #define KEY_SIZE 144
 #define KEY_SPACING 24 // between neighbouring keys on the grid
 #define KEY_OFFSET 22  // extra shift of the OPTION/EDIT and SHIFT/PLAY pairs
-#define KEY_BOTTOM_MARGIN 48
+#define KEY_BOTTOM_MARGIN 40
+
+#define LAND_M8_X 160
+#define LAND_M8_Y 0
+#define LAND_M8_W 960
+#define LAND_M8_H 720
+#define LAND_ROW_Y 300 // the panel in the left margin, between the icons and SHIFT
+#define LAND_ROW_H 236
+
+// Landscape keys, in the margins either side of the M8 screen: a column of EDIT, OPTION, PLAY
+// and SHIFT up from the bottom-right corner, and SHIFT in the bottom-left corner.
+#define LKEY_SIZE 136
+#define LKEY_GAP 12
+#define LKEY_MARGIN 12
+
+// Landscape arrows are swipes: a finger moving this far from where it landed, mostly along one
+// axis, holds that arrow until it lifts.
+#define SWIPE_DISTANCE 32
+#define SWIPE_MIN_HOLD_MS 50 // quick flicks still reach the M8 as a press
+
+// Optionally, held arrows repeat at microm8's pace rather than the M8's: the M8 is sent a tap of
+// ARROW_TAP_MS straight away, then after ARROW_REPEAT_DELAY_MS one every ARROW_REPEAT_MS (SHIFT +
+// arrow passes through as held). Off (0) by default: the M8 knows when a held arrow should stop
+// acting (e.g. SHIFT+DOWN into the song view doesn't carry on moving the cursor down), and
+// re-tapping from outside defeats that.
+#define ARROW_TAP_MS 50
+#define ARROW_REPEAT_DELAY_MS 400
+#define ARROW_REPEAT_MS 0
+
+// Accelerometer (BMI270) orientation: which screen orientation each axis reading means. At
+// rest the sensor reads +1 g pointing up, away from the ground (opposite to gravity). 0 = portrait, 1 = landscape, 2 = portrait upside down,
+// 3 = landscape the other way round. The "orientation:" log line shows what was sensed.
+#ifndef TAB5_GRAVITY_POS_X
+#define TAB5_GRAVITY_POS_X 3
+#endif
+#ifndef TAB5_GRAVITY_NEG_X
+#define TAB5_GRAVITY_NEG_X 1
+#endif
+#ifndef TAB5_GRAVITY_POS_Y
+#define TAB5_GRAVITY_POS_Y 0
+#endif
+#ifndef TAB5_GRAVITY_NEG_Y
+#define TAB5_GRAVITY_NEG_Y 2
+#endif
 
 // ---------------------------------------------------------------------------
 // Audio: ES8388 codec (speaker amp + headphone jack) and ES7210 mic ADC share I2S0.
@@ -79,7 +110,7 @@
 #endif
 
 // ---------------------------------------------------------------------------
-// The M8 Headless draws a 320x240 screen; it's shown at M8_SCALE.
+// The M8 Headless draws a 320x240 screen, scaled to the layout's M8 rectangle.
 // ---------------------------------------------------------------------------
 #define M8_SCREEN_W 320
 #define M8_SCREEN_H 240

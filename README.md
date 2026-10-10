@@ -5,28 +5,44 @@ for the **Dirtywave M8 Headless** running on a Teensy 4.1.
 
 The Teensy plugs into the Tab5's USB-A port. The Tab5 powers it, renders the M8's screen,
 plays its audio through the speaker or headphone jack, and sends key presses from an
-on-screen multi-touch keypad laid out like the real M8.
+on-screen multi-touch keypad. It works in portrait, with the M8's own key layout, and in
+landscape, with a bigger M8 screen and keys at the sides.
 
 The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimplemented for the
 ESP32.
 
-<img src="docs/layout-preview.png" width="360" alt="Portrait layout: M8 screen at the top, status bar, M8 keys at the bottom">
-
-*Layout preview with SHIFT and RIGHT held. The M8 area shows test output from the unit-test
-harness.*
-
 ## Layout
 
-The Tab5's 5" screen is used in portrait (720×1280):
+The screen follows the Tab5's accelerometer through all four orientations. The rotation icon
+locks it; tap it again to unlock. The lock and the last orientation are saved.
 
-- **M8 screen at 2×** (640×480) at the top, a clean integer scale of the Headless's 320×240.
-- **Status bar:** connection and firmware version on the left; volume, brightness and power
-  icons on the right.
+The M8's 320×240 screen is scaled with pixel-area resampling. Each display pixel averages the
+M8 pixels it covers, so text stays sharp at non-integer scales.
+
+**Portrait** (720×1280):
+
+- **M8 screen at 2.25×** (720×540) across the full width at the top.
+- **Status bar:** connection and firmware version on the left; volume, brightness, rotation
+  and power icons on the right.
 - **The M8's own key layout** along the bottom: the cursor keys as an inverted T, SHIFT/PLAY
   directly under DOWN/RIGHT, and OPTION/EDIT up and to the right of UP, as on the hardware.
   Keys are 144 px (about 12.5 mm).
 
-To turn the layout upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`.
+**Landscape** (1280×720):
+
+- **M8 screen at 3×** (960×720), centred.
+- **Left margin:** the power, volume, brightness and rotation icons; under them a panel with
+  the arrow pad (or an open slider, the power details or a message); SHIFT in the bottom-left
+  corner.
+- **Right margin:** EDIT, OPTION, PLAY and SHIFT, stacked up from the bottom-right corner.
+- No connection text, to keep the margins clear.
+
+Keys are drawn as a purple label or arrow; while held, they turn white and their touch area
+is outlined.
+
+To turn portrait upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`. If tilting
+picks the wrong orientation, the `TAB5_GRAVITY_*` settings in `src/config.h` map the
+accelerometer's axes to orientations; the log's `orientation:` lines show the readings.
 
 ## Controls
 
@@ -34,17 +50,27 @@ To turn the layout upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.i
   hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Each key's touch area
   reaches halfway into the gap around it, so near misses still count without neighbouring
   keys overlapping.
+- **Arrows in landscape:**
+  - **Arrow pad:** the four arrows in the left panel. Each arrow owns a triangle of the
+    panel, cut by the diagonals of the square around the arrows, so the whole panel is
+    touchable.
+  - **Swipes:** swipe right, left, up or down anywhere on the left half of the screen (the M8
+    screen included). Keep the finger down to hold the arrow; lifting it releases.
 - **Volume icon** (a speaker, or headphones when they're the output): opens a row with the
   SPK/HP toggle and a volume slider (0–10). Plugging headphones in switches to them
   automatically, and unplugging switches back. Each output keeps its own volume.
 - **Brightness icon** (sun): opens a brightness slider. The lowest step is 30%, where the
   backlight stops dimming. Dimming also cuts power: about 0.8 W between 30% and full.
+- **Rotation icon:** locks or unlocks rotation (crossed out in red when locked).
 - **Power icon:** a battery filled and coloured by charge (green when full, yellow around
   half, red when low); an empty battery with a green bolt while charging; a full battery with
   a light bolt when plugged in and full; a plug when no battery is fitted. Tap it for the
   details in words.
-- Rows open under the status bar without covering the M8 screen or keys, and close when you
-  tap the icon again or after 4 seconds. Volumes, output and brightness are saved to flash.
+- **Sliders:** once a finger grabs a slider, the slider follows it until it lifts, wherever
+  it moves. Slide your thumb off to see the knob.
+- Rows open under the status bar (in landscape, in the left panel) without covering the M8
+  screen, and close when you tap the icon again or 4 seconds after the last touch. Volumes,
+  output and brightness are saved to flash.
 
 ## Hardware setup
 
@@ -83,8 +109,8 @@ pio test -e native
 | `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
 | `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. Ported from m8c. |
 | `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
-| `src/display/ui.cpp` | Portrait layout through M5GFX: scales changed bands 2× to the display at up to 60 Hz, draws the keypad, status bar icons and the volume/brightness/power row. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
-| `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and key hit-testing. Produces the M8 key bitmask (`'C'` + mask). |
+| `src/display/ui.cpp` | Portrait and landscape layouts through M5GFX: scales changed bands of the M8 screen (pixel-area resampling) at up to 60 Hz, draws the keys, status icons, the volume/brightness/power row and the landscape arrow pad. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
+| `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and the portrait and landscape key layouts and hit-testing. `main.cpp` gives each finger a role (keys, slider, swipe, arrow pad) and produces the M8 key bitmask (`'C'` + mask). |
 | `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), a silence gate so the codec goes quiet between songs, per-output volume levels, mono mix for the speaker. |
 | `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. |
 | `src/board.cpp` | M5Unified bring-up, USB-A 5 V, and the lock for the shared internal I2C bus. Switches off hardware microm8 doesn't use (the ESP32-C6 wireless chip and the camera). Battery state from the INA226 current sensor: charging, plugged in, or no battery. |

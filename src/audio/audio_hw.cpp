@@ -32,6 +32,10 @@ constexpr uint8_t kRegOutVolLast = 49;
 constexpr uint8_t kOutVolMax = 0x21;
 constexpr int kOutVolStepsPerLevel = 3; // 4.5 dB per volume level
 
+constexpr uint8_t kRegChipPower = 2;
+constexpr uint8_t kChipPowerResetStm = 0xF0; // digital powered down, ADC/DAC state machines reset
+constexpr uint8_t kChipPowerDacOn = 0x0A;    // DAC up; ADC DLL and reference down
+
 i2s_chan_handle_t tx;
 i2s_chan_handle_t rx; // for the mics; created but not enabled yet
 
@@ -39,7 +43,7 @@ i2s_chan_handle_t rx; // for the mics; created but not enabled yet
 // LOUT2/ROUT2 speaker) enabled, ADC powered down. {register, value} pairs.
 constexpr uint8_t kEs8388Init[][2] = {
     {0, 0x80},  {0, 0x00},  {0, 0x00},  {0, 0x0E}, {1, 0x00},
-    {2, 0x0A},  // chip power: all up
+    {2, 0x0A},  // chip power: DAC up, ADC down (kChipPowerDacOn)
     {3, 0xFF},  // ADC power: all down
     {4, 0x3C},  // DAC power: up, LOUT1/ROUT1/LOUT2/ROUT2 enabled
     {5, 0x00},  {6, 0x00}, {7, 0x7C},
@@ -104,6 +108,19 @@ bool begin(int sample_rate) {
     for (const auto &rv : kEs8388Init) {
       ok &= M5.In_I2C.writeRegister8(TAB5_ES8388_ADDR, rv[0], rv[1], kI2cHz);
     }
+  }
+  // The control-port reset at the start of the sequence doesn't restart the codec's ADC/DAC
+  // state machines, and after a reset of the P4 alone (flashing, the reset button) they were
+  // left running from the previous boot with MCLK pulled from under them. Restart them, as
+  // Espressif's ES8388 driver does when starting the codec.
+  {
+    board::I2CLock lock;
+    ok &= M5.In_I2C.writeRegister8(TAB5_ES8388_ADDR, kRegChipPower, kChipPowerResetStm, kI2cHz);
+  }
+  vTaskDelay(pdMS_TO_TICKS(10));
+  {
+    board::I2CLock lock;
+    ok &= M5.In_I2C.writeRegister8(TAB5_ES8388_ADDR, kRegChipPower, kChipPowerDacOn, kI2cHz);
   }
   if (!ok) ESP_LOGE(TAG, "ES8388 setup failed (I2C)");
   ESP_LOGI(TAG, "ES8388 on I2S0 at %d Hz", sample_rate);

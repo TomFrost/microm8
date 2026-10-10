@@ -285,4 +285,8 @@ uint64_t take_dirty_bands() {
 
 void mark_all_dirty() { mark_rows(0, fb_h - 1); }
 
+void mark_dirty(int y0, int y1) {
+  if (y1 > y0) mark_rows(y0, y1 - 1);
+}
+
 } // namespace m8screen
