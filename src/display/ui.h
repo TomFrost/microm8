@@ -1,7 +1,7 @@
 // Owns the display: the scaled M8 framebuffer, the on-screen keys, the status icons and the
 // row of controls (volume/brightness sliders, power details), in portrait or landscape. All
 // functions must be called from the UI task, except hit_test(), slider_value(),
-// in_swipe_area() and arrow_at(), which are safe from any task.
+// in_swipe_area() and pad_key_at(), which are safe from any task.
 #pragma once
 
 #include <stdint.h>
@@ -36,6 +36,7 @@ struct Status {
   int battery;  // percent, or -1 if unknown
   int power_mw; // load in mW, shown for power diagnostics; -1 hides it
   bool rotation_locked;
+  bool compact_keys; // the key layout icon is lit
   const char *message; // shown in place of the connection text when set (portrait)
 };
 
@@ -52,12 +53,15 @@ struct Controls {
   uint8_t arrows;      // landscape: arrow keys held, lit on the panel's arrow pad
 };
 
-bool begin(Orientation orientation);
+bool begin(Orientation orientation, bool compact_keys);
 void set_backlight(uint8_t level);
 
 // Rotates the display and redraws everything for the new layout.
 void set_orientation(Orientation orientation);
 Orientation orientation();
+
+// Switches to the compact key layout (pads for each thumb) or back, and redraws.
+void set_compact_keys(bool on);
 
 // Brightness level (kBrightnessMin..kBrightnessMax) to backlight PWM level.
 uint8_t backlight_for(int brightness);
@@ -90,6 +94,7 @@ enum class Hit : uint8_t {
   kBrightnessIcon,
   kRotationIcon,
   kPowerIcon,
+  kKeysIcon,
   kOutputToggle,
   kSlider,
 };
@@ -103,8 +108,8 @@ int slider_value(int x, int y, Popup open);
 // left half; nowhere in portrait).
 bool in_swipe_area(int x, int y);
 
-// The arrow key under (x, y) on the landscape panel's arrow pad, or 0 (also while the panel
-// shows something else).
-uint8_t arrow_at(int x, int y);
+// The key under (x, y) on a pad (the arrow pad or the OPTION/EDIT/PLAY triangle), or 0. The
+// landscape panel's arrow pad only counts while the panel shows it.
+uint8_t pad_key_at(int x, int y);
 
 } // namespace ui

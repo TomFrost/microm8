@@ -55,6 +55,7 @@ std::atomic<ui::Popup> popup{ui::Popup::kNone};
 std::atomic<uint32_t> popup_touched_at{0};
 std::atomic<int> brightness{ui::kBrightnessMax};
 std::atomic<bool> rotation_locked{false};
+std::atomic<bool> compact_keys{false};
 std::atomic<uint32_t> message_at{0}; // when the rotation lock was last toggled
 
 constexpr uint8_t kArrowKeys = m8proto::kKeyUp | m8proto::kKeyDown | m8proto::kKeyLeft |
@@ -68,6 +69,7 @@ void save_settings() {
   prefs.putUChar("output", (uint8_t)audio::output());
   prefs.putUChar("bright", (uint8_t)brightness.load());
   prefs.putUChar("rot_lock", rotation_locked ? 1 : 0);
+  prefs.putUChar("compact", compact_keys ? 1 : 0);
   prefs.putUChar("orient", (uint8_t)ui::orientation());
 }
 
@@ -188,6 +190,7 @@ void ui_task(void *) {
   uint32_t last_power_log = 0;
   uint32_t log_from = 0; // when the audio/display report window started
   int applied_brightness = -1;
+  bool applied_compact = compact_keys;
   uint32_t shown_log_version = logcap::version() - 1; // draw the log on the first frame
 
   show_disconnected(last_state);
@@ -234,6 +237,10 @@ void ui_task(void *) {
 
     poll_jack_detect(now);
     log_audio(now, log_from);
+    if (compact_keys != applied_compact) {
+      applied_compact = compact_keys;
+      ui::set_compact_keys(applied_compact);
+    }
     if (poll_orientation(now)) {
       settings_changed = true;
       log_from = now ? now : 1;
@@ -290,6 +297,7 @@ void ui_task(void *) {
       st.battery = board::battery_percent();
       st.power_mw = MICROM8_POWER_DIAG ? board::power_draw_mw() : -1;
       st.rotation_locked = rotation_locked;
+      st.compact_keys = applied_compact;
       const uint32_t message_since = message_at;
       if (message_since && (int32_t)(now - message_since) < (int32_t)kMessageMs) {
         st.message = st.rotation_locked ? "Rotation locked" : "Rotation enabled";
@@ -316,7 +324,7 @@ void ui_task(void *) {
 // - on a status icon or row button: acts once, then is ignored;
 // - on a slider: drags it, following the finger's position along the slider's axis anywhere
 //   on the screen (so the thumb can move off the slider to uncover the knob);
-// - on the landscape arrow pad: holds the arrow under it, like a key;
+// - on a pad (arrows, or the OPTION/EDIT/PLAY triangle): holds the key under it, like a key;
 // - in the swipe area (landscape's left half) but not on a key: an arrow swipe, holding that
 //   arrow from when the swipe is recognised until the finger lifts;
 // - anywhere else: presses whichever key it's over, so fingers can slide between keys.
@@ -369,6 +377,10 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
   case ui::Hit::kPowerIcon:
     popup = open == ui::Popup::kPower ? ui::Popup::kNone : ui::Popup::kPower;
     break;
+  case ui::Hit::kKeysIcon:
+    compact_keys = !compact_keys;
+    settings_changed = true;
+    break;
   case ui::Hit::kRotationIcon:
     rotation_locked = !rotation_locked;
     message_at = now ? now : 1;
@@ -386,7 +398,7 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
   case ui::Hit::kNone:
     if (keypad::mask_for(&p, 1)) {
       f.role = Role::kKeys;
-    } else if (ui::arrow_at(p.x, p.y)) {
+    } else if (ui::pad_key_at(p.x, p.y)) {
       f.role = Role::kPad;
     } else {
       f.role = ui::in_swipe_area(p.x, p.y) ? Role::kSwipe : Role::kKeys;
@@ -446,7 +458,7 @@ void touch_task(void *) {
       bool seen[touch::kMaxPoints] = {};
       touch::Point key_points[touch::kMaxPoints];
       int key_count = 0;
-      uint8_t arrows = 0;
+      uint8_t pad_keys = 0; // held on pads and by swipes
 
       for (int i = 0; i < count; i++) {
         const touch::Point &p = points[i];
@@ -475,14 +487,14 @@ void touch_task(void *) {
           }
           break;
         case Role::kPad:
-          arrows |= ui::arrow_at(p.x, p.y);
+          pad_keys |= ui::pad_key_at(p.x, p.y);
           break;
         case Role::kSwipe:
           if (!f.arrow) {
             f.arrow = swipe_arrow(p.x - f.x0, p.y - f.y0);
             f.arrow_at = now;
           }
-          arrows |= f.arrow;
+          pad_keys |= f.arrow;
           break;
         case Role::kIgnore:
           break;
@@ -501,7 +513,7 @@ void touch_task(void *) {
       }
       if (flicked && (int32_t)(now - flicked_until) >= 0) flicked = 0;
 
-      mask = keypad::mask_for(key_points, key_count) | arrows | flicked;
+      mask = keypad::mask_for(key_points, key_count) | pad_keys | flicked;
       held_keys = mask;
     }
 
@@ -542,6 +554,7 @@ void setup() {
                    ? ui::kBrightnessMax
                    : saved_brightness;
   rotation_locked = prefs.getUChar("rot_lock", 0) != 0;
+  compact_keys = prefs.getUChar("compact", 0) != 0;
   const int saved_orientation = prefs.getUChar("orient", 0);
   const auto orientation = saved_orientation <= (int)ui::Orientation::kLandscapeFlipped
                                ? (ui::Orientation)saved_orientation
@@ -550,7 +563,7 @@ void setup() {
   if (!m8screen::init()) ESP_LOGE(TAG, "framebuffer init failed");
   m8proto::init();
 
-  if (!ui::begin(orientation)) ESP_LOGE(TAG, "display init failed");
+  if (!ui::begin(orientation, compact_keys)) ESP_LOGE(TAG, "display init failed");
   const bool touch_ok = touch::begin();
   if (!touch_ok) ESP_LOGE(TAG, "touch init failed; on-screen keys disabled");
   if (!audio::start(speaker_volume, headphone_volume, output)) {

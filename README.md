@@ -37,7 +37,12 @@ M8 pixels it covers, so text stays sharp at non-integer scales.
 - **Right margin:** EDIT, OPTION, PLAY and SHIFT, stacked up from the bottom-right corner.
 - No connection text, to keep the margins clear.
 
-Keys are drawn as a purple label or arrow; while held, they turn white and their touch area
+**Compact keys** (the key layout icon toggles them, in either orientation): a pad for each
+thumb. The arrows sit in a diamond on the left; OPTION, EDIT and PLAY (⌥, a pencil, ▶) sit in a
+triangle on the right, at the same height; SHIFT stays in both bottom corners. In portrait the
+pads replace the M8 keypad; in landscape the triangle replaces the right-hand column.
+
+Keys are drawn as a purple label or symbol; while held, they turn white and their touch area
 is outlined.
 
 To turn portrait upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`. If tilting
@@ -53,7 +58,8 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
 - **Arrows in landscape:**
   - **Arrow pad:** the four arrows in the left panel. Each arrow owns a triangle of the
     panel, cut by the diagonals of the square around the arrows, so the whole panel is
-    touchable.
+    touchable. The compact OPTION/EDIT/PLAY triangle works the same way, in three equal
+    wedges.
   - **Swipes:** swipe right, left, up or down anywhere on the left half of the screen (the M8
     screen included). Keep the finger down to hold the arrow; lifting it releases.
 - **Volume icon** (a speaker, or headphones when they're the output): opens a row with the
@@ -62,6 +68,7 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
 - **Brightness icon** (sun): opens a brightness slider. The lowest step is 30%, where the
   backlight stops dimming. Dimming also cuts power: about 0.8 W between 30% and full.
 - **Rotation icon:** locks or unlocks rotation (crossed out in red when locked).
+- **Key layout icon:** switches compact keys on or off (lit while on).
 - **Power icon:** a battery filled and coloured by charge (green when full, yellow around
   half, red when low); an empty battery with a green bolt while charging; a full battery with
   a light bolt when plugged in and full; a plug when no battery is fitted. Tap it for the

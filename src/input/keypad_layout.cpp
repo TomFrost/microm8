@@ -13,13 +13,22 @@
 // outer keys, so near misses still register without neighbouring keys overlapping.
 //
 // Landscape: in the margins either side of the M8 screen. The arrows are swipes (main.cpp),
-// or taps on the arrow pad in the left panel (display/ui.cpp).
+// or taps on the arrow pad in the left panel.
 //
-//    (icons)  +------------+
+//    (icons)  +------------+  (layout)
 //             |            |  [ EDIT ]
 //    (arrows) |     M8     |  [OPTION]
 //             |            |  [ PLAY ]
 //    [SHIFT]  +------------+  [SHIFT ]
+//
+// Compact: pads for each thumb, OPTION/EDIT/PLAY as a triangle opposite the arrows, and SHIFT
+// in both bottom corners. In landscape they're in the margins; in portrait they replace the
+// keypad.
+//
+//      ^         OPT  EDIT
+//    <   >   ...    PLAY
+//      v
+//    [SHIFT]       [SHIFT]
 #include "input/keypad.h"
 
 #include <atomic>
@@ -128,22 +137,89 @@ const Key kLandscapeKeys[] = {
     make_landscape_key("SHIFT", kKeySelect, kLLeftX, kLRowY3),
 };
 
-constexpr int kPortraitCount = sizeof(kPortraitKeys) / sizeof(kPortraitKeys[0]);
-constexpr int kLandscapeCount = sizeof(kLandscapeKeys) / sizeof(kLandscapeKeys[0]);
-static_assert(kPortraitCount <= kMaxKeys && kLandscapeCount <= kMaxKeys, "raise kMaxKeys");
+// Landscape pads, centred on the left panel's height. The arrows sit in the panel (which
+// shows sliders and messages in their place); the triangle mirrors them in the right margin,
+// its touch area reaching from below the layout icon down to SHIFT.
+constexpr int kLPadY = LAND_ROW_Y + LAND_ROW_H / 2;
+constexpr int kLPadHalf = LAND_M8_X / 2;
+constexpr int kLRightPadX = LAND_M8_X + LAND_M8_W - kLReach;
+constexpr int kLRightPadTop = 80; // below the layout icon
+constexpr int kLRightPadBottom = kLRowY3 - LKEY_GAP / 2;
 
-const Table kPortraitTable = {kPortraitKeys, kPortraitCount};
-const Table kLandscapeTable = {kLandscapeKeys, kLandscapeCount};
+const Pad kLandscapeArrows = {PadKind::kArrows, kLPadHalf, kLPadY, kLPadHalf, 50, 15,
+                              0, LAND_ROW_Y, LAND_M8_X + kLReach, LAND_ROW_H, true};
+const Pad kLandscapeTriangle = {PadKind::kTriangle,
+                                LAND_M8_X + LAND_M8_W + kLPadHalf,
+                                kLPadY,
+                                kLPadHalf,
+                                52,
+                                16,
+                                kLRightPadX,
+                                kLRightPadTop,
+                                kLandW - kLRightPadX,
+                                kLRightPadBottom - kLRightPadTop,
+                                false};
+const Pad kLandscapeCompactPads[] = {kLandscapeArrows, kLandscapeTriangle};
+const Key kLandscapeCompactKeys[] = {
+    make_landscape_key("SHIFT", kKeySelect, kLRightX, kLRowY3),
+    make_landscape_key("SHIFT", kKeySelect, kLLeftX, kLRowY3),
+};
+
+// Portrait compact: the pads side by side under the slider row, SHIFT in the corners.
+constexpr int kCMargin = 20;
+constexpr int kCShiftY = LCD_HEIGHT - kCMargin - KEY_SIZE;
+constexpr int kCPadTop = PORT_ROW_Y + PORT_ROW_H + 8;
+constexpr int kCPadY = (kCPadTop + kCShiftY - KEY_SPACING / 2) / 2;
+constexpr int kCPadHalf = 150;
+static_assert(kCPadY - kCPadHalf >= kCPadTop && kCPadY + kCPadHalf <= kCShiftY,
+              "portrait compact pads don't fit");
+
+constexpr Key make_corner_shift(bool left) {
+  const int vx = left ? kCMargin : LCD_WIDTH - kCMargin - KEY_SIZE;
+  const int x0 = left ? 0 : vx - KEY_SPACING / 2;
+  const int x1 = left ? vx + KEY_SIZE + KEY_SPACING / 2 : LCD_WIDTH;
+  const int y0 = kCShiftY - KEY_SPACING / 2;
+  return Key{"SHIFT",
+             kKeySelect,
+             Icon::kNone,
+             (int16_t)x0,
+             (int16_t)y0,
+             (int16_t)(x1 - x0),
+             (int16_t)(LCD_HEIGHT - y0),
+             (int16_t)vx,
+             (int16_t)kCShiftY,
+             KEY_SIZE,
+             KEY_SIZE};
+}
+
+const Key kPortraitCompactKeys[] = {make_corner_shift(true), make_corner_shift(false)};
+const Pad kPortraitCompactPads[] = {
+    {PadKind::kArrows, LCD_WIDTH / 4, kCPadY, kCPadHalf, 95, 24, 0, kCPadTop, LCD_WIDTH / 2,
+     LCD_HEIGHT - kCPadTop, false},
+    {PadKind::kTriangle, LCD_WIDTH * 3 / 4, kCPadY, kCPadHalf, 100, 26, LCD_WIDTH / 2, kCPadTop,
+     LCD_WIDTH / 2, LCD_HEIGHT - kCPadTop, false},
+};
+
+template <typename T, int N> constexpr int count_of(const T (&)[N]) { return N; }
+static_assert(count_of(kPortraitKeys) <= kMaxKeys && count_of(kLandscapeKeys) <= kMaxKeys,
+              "raise kMaxKeys");
+
+const Table kPortraitTable = {kPortraitKeys, count_of(kPortraitKeys), nullptr, 0};
+const Table kLandscapeTable = {kLandscapeKeys, count_of(kLandscapeKeys), &kLandscapeArrows, 1};
+const Table kPortraitCompactTable = {kPortraitCompactKeys, count_of(kPortraitCompactKeys),
+                                     kPortraitCompactPads, count_of(kPortraitCompactPads)};
+const Table kLandscapeCompactTable = {kLandscapeCompactKeys, count_of(kLandscapeCompactKeys),
+                                      kLandscapeCompactPads, count_of(kLandscapeCompactPads)};
 std::atomic<const Table *> active{&kPortraitTable};
 
 } // namespace
 
-void set_arrangement(Arrangement arrangement) {
-  active = arrangement == Arrangement::kLandscape ? &kLandscapeTable : &kPortraitTable;
-}
-
-Arrangement arrangement() {
-  return active.load() == &kLandscapeTable ? Arrangement::kLandscape : Arrangement::kPortrait;
+void set_arrangement(Arrangement arrangement, bool compact) {
+  if (arrangement == Arrangement::kLandscape) {
+    active = compact ? &kLandscapeCompactTable : &kLandscapeTable;
+  } else {
+    active = compact ? &kPortraitCompactTable : &kPortraitTable;
+  }
 }
 
 const Table &table() { return *active.load(); }

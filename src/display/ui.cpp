@@ -70,7 +70,7 @@ struct Rect {
   bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 
-enum IconIndex { kIconVolume, kIconBrightness, kIconRotation, kIconPower, kIconCount };
+enum IconIndex { kIconVolume, kIconBrightness, kIconRotation, kIconPower, kIconKeys, kIconCount };
 
 struct Layout {
   bool landscape;
@@ -97,17 +97,17 @@ const Layout kPortrait = {
     true,
     48,
     kPortStatusCy,
-    {448, 520, 592, 668},
-    {kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy},
+    {448, 520, 592, 668, 376},
+    {kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy},
     {0, PORT_ROW_Y, LCD_WIDTH, PORT_ROW_H},
     false,
-    404,
+    330,
     kPortStatusCy,
     {0, 0, 0, 0},
 };
 
 // Landscape: icons down the left margin (battery first), the panel under them, and SHIFT in
-// the corner (keypad_layout.cpp).
+// the corner (keypad_layout.cpp). The key layout icon heads the right margin, over the keys.
 const Layout kLandscape = {
     true,
     LCD_HEIGHT,
@@ -117,8 +117,9 @@ const Layout kLandscape = {
     false,
     0,
     0,
-    {LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2},
-    {104, 168, 232, 40},
+    {LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2,
+     LAND_M8_X + LAND_M8_W + LAND_M8_X / 2},
+    {104, 168, 232, 40, 40},
     {0, LAND_ROW_Y, LAND_M8_X, LAND_ROW_H},
     true,
     LAND_M8_X - 10,
@@ -131,6 +132,7 @@ const Layout &L() { return *layout_ptr.load(); }
 
 int base_rotation;           // M5GFX rotation for kPortrait
 Orientation cur_orientation; // UI task only
+bool compact;                // compact key layout
 
 constexpr int kIconHalfZone = 32; // touch zone half-size around an icon
 
@@ -591,19 +593,71 @@ void write_runs(const Run *runs, int count) {
 // Drawing helpers
 // ---------------------------------------------------------------------------
 
-void draw_arrow(Gfx &d, keypad::Icon icon, int cx, int cy, int s, uint16_t color) {
+// Pencil, tip at the bottom left, about 2s across.
+void draw_pencil(Gfx &d, int cx, int cy, int s, uint16_t color) {
+  const float r = s * 0.24f;                                   // half the body's width
+  const float bx = cx - s * 0.45f, by = cy + s * 0.45f;        // the tip's base
+  d.drawWideLine(cx - s * 0.28f, cy + s * 0.28f, cx + s, cy - s, r, color);
+  d.fillTriangle(cx - s, cy + s, bx - r * 0.7071f, by - r * 0.7071f, bx + r * 0.7071f,
+                 by + r * 0.7071f, color);
+}
+
+// The Option key symbol (as on Mac keyboards), about 2s across.
+void draw_option(Gfx &d, int cx, int cy, int s, uint16_t color) {
+  const float r = s * 0.12f < 1.2f ? 1.2f : s * 0.12f;
+  const float top = cy - s * 0.55f, bottom = cy + s * 0.55f;
+  d.drawWideLine(cx - s, top, cx - s * 0.35f, top, r, color);
+  d.drawWideLine(cx - s * 0.35f, top, cx + s * 0.35f, bottom, r, color);
+  d.drawWideLine(cx + s * 0.35f, bottom, cx + s, bottom, r, color);
+  d.drawWideLine(cx + s * 0.15f, top, cx + s, top, r, color);
+}
+
+// Arrow as a thin chevron, 2s wide and s deep (so it can't be mistaken for PLAY's triangle).
+void draw_chevron(Gfx &d, keypad::Icon icon, int cx, int cy, int s, uint16_t color) {
+  const float r = s * 0.09f < 1.2f ? 1.2f : s * 0.09f;
+  const float h = s / 2.0f;
+  float tip_x = cx, tip_y = cy, ax = 0, ay = 0; // tip, and one arm's end relative to the tip
   switch (icon) {
   case keypad::Icon::kUp:
-    d.fillTriangle(cx, cy - s, cx - s, cy + s / 2 + 4, cx + s, cy + s / 2 + 4, color);
+    tip_y = cy - h, ax = s, ay = s;
     break;
   case keypad::Icon::kDown:
-    d.fillTriangle(cx, cy + s, cx - s, cy - s / 2 - 4, cx + s, cy - s / 2 - 4, color);
+    tip_y = cy + h, ax = s, ay = -s;
     break;
   case keypad::Icon::kLeft:
-    d.fillTriangle(cx - s, cy, cx + s / 2 + 4, cy - s, cx + s / 2 + 4, cy + s, color);
+    tip_x = cx - h, ax = s, ay = s;
     break;
+  default: // right
+    tip_x = cx + h, ax = -s, ay = s;
+    break;
+  }
+  const bool vertical = icon == keypad::Icon::kUp || icon == keypad::Icon::kDown;
+  if (vertical) {
+    d.drawWideLine(tip_x, tip_y, tip_x - ax, tip_y + ay, r, color);
+    d.drawWideLine(tip_x, tip_y, tip_x + ax, tip_y + ay, r, color);
+  } else {
+    d.drawWideLine(tip_x, tip_y, tip_x + ax, tip_y - ay, r, color);
+    d.drawWideLine(tip_x, tip_y, tip_x + ax, tip_y + ay, r, color);
+  }
+}
+
+// Arrows and key symbols, about 2s across.
+void draw_icon(Gfx &d, keypad::Icon icon, int cx, int cy, int s, uint16_t color) {
+  switch (icon) {
+  case keypad::Icon::kEdit:
+    draw_pencil(d, cx, cy, s, color);
+    break;
+  case keypad::Icon::kOption:
+    draw_option(d, cx, cy, s, color);
+    break;
+  case keypad::Icon::kPlay:
+    d.fillTriangle(cx - s * 7 / 10, cy - s, cx - s * 7 / 10, cy + s, cx + s, cy, color);
+    break;
+  case keypad::Icon::kUp:
+  case keypad::Icon::kDown:
+  case keypad::Icon::kLeft:
   case keypad::Icon::kRight:
-    d.fillTriangle(cx + s, cy, cx - s / 2 - 4, cy - s, cx - s / 2 - 4, cy + s, color);
+    draw_chevron(d, icon, cx, cy, s, color);
     break;
   default:
     break;
@@ -642,7 +696,7 @@ void draw_key(Gfx &d, const keypad::Key &k, bool down) {
   const uint16_t fg = down ? kKeyPressed : kKeyPurple;
   const int cx = k.vx + k.vw / 2, cy = k.vy + k.vh / 2;
   if (k.icon != keypad::Icon::kNone) {
-    draw_arrow(d, k.icon, cx, cy, 24, fg);
+    draw_icon(d, k.icon, cx, cy, 24, fg);
     return;
   }
   d.setFont(&fonts::FreeSansBold12pt7b);
@@ -904,44 +958,81 @@ void draw_panel_text(Gfx &d, const Layout &l, const char *text) {
   draw_wrapped(d, text, l.row.x + l.row.w / 2, l.row.y + 40, l.row.w - 20, 30);
 }
 
-// The arrow pad in the landscape panel: four arrows in a diamond, in a square as wide as the
-// panel. Diagonals through the square's corners split it into four triangles, one per arrow,
-// and each arrow owns its triangle; the panel's space above and below the square, and a strip
-// of the M8 screen beside it, extend the up/down and right triangles outwards. Shown while the
-// panel has nothing else to show.
-constexpr int kPadArrowOffset = 50; // arrow centres from the pad's centre
-constexpr int kPadArrowSize = 15;
-constexpr int kPadReach = 16; // into the M8 screen
-
-struct PadArrow {
+// Pads (keypad.h): each key's icon round the centre, and while held, the outline of its wedge
+// within the pad's square.
+struct PadKey {
   keypad::Icon icon;
   uint8_t bit;
-  int dx, dy; // direction
+  float dx, dy; // icon direction from the centre
 };
-const PadArrow kPad[] = {{keypad::Icon::kUp, m8proto::kKeyUp, 0, -1},
-                         {keypad::Icon::kDown, m8proto::kKeyDown, 0, 1},
-                         {keypad::Icon::kLeft, m8proto::kKeyLeft, -1, 0},
-                         {keypad::Icon::kRight, m8proto::kKeyRight, 1, 0}};
+const PadKey kArrowKeys[] = {{keypad::Icon::kUp, m8proto::kKeyUp, 0, -1},
+                             {keypad::Icon::kDown, m8proto::kKeyDown, 0, 1},
+                             {keypad::Icon::kLeft, m8proto::kKeyLeft, -1, 0},
+                             {keypad::Icon::kRight, m8proto::kKeyRight, 1, 0}};
+// OPTION and EDIT at 30 degrees above horizontal, PLAY straight down: the wedges' middles.
+const PadKey kTriangleKeys[] = {{keypad::Icon::kOption, m8proto::kKeyOpt, -0.866f, -0.5f},
+                                {keypad::Icon::kEdit, m8proto::kKeyEdit, 0.866f, -0.5f},
+                                {keypad::Icon::kPlay, m8proto::kKeyStart, 0, 1}};
 
-std::atomic<bool> pad_shown{false}; // read from the touch task
+std::atomic<bool> pad_shown{false}; // the landscape panel shows its pad; read from touch
 
-void draw_arrow_pad(Gfx &d, const Layout &l, uint8_t arrows) {
-  const int cx = l.row.x + l.row.w / 2, cy = l.row.y + l.row.h / 2;
-  const int h = l.row.w / 2 - kPressInset; // the square's half-size, inset like key outlines
-  for (const PadArrow &a : kPad) {
-    const bool down = arrows & a.bit;
-    if (down) {
-      // The arrow's triangle: the centre and the two corners on its side.
-      const int px = a.dx ? a.dx : -1, py = a.dy ? a.dy : -1;
-      const int qx = a.dx ? a.dx : 1, qy = a.dy ? a.dy : 1;
-      const int x1 = cx + px * h, y1 = cy + py * h, x2 = cx + qx * h, y2 = cy + qy * h;
-      d.drawWideLine(cx, cy, x1, y1, 1.0f, kKeyPressed);
-      d.drawWideLine(x1, y1, x2, y2, 1.0f, kKeyPressed);
-      d.drawWideLine(x2, y2, cx, cy, 1.0f, kKeyPressed);
-    }
-    draw_arrow(d, a.icon, cx + a.dx * kPadArrowOffset, cy + a.dy * kPadArrowOffset,
-               kPadArrowSize, down ? kKeyPressed : kKeyPurple);
+void draw_outline(Gfx &d, const int (*pts)[2], int n, uint16_t color) {
+  for (int i = 0; i < n; i++) {
+    const int *a = pts[i], *b = pts[(i + 1) % n];
+    d.drawWideLine(a[0], a[1], b[0], b[1], 1.0f, color);
   }
+}
+
+// The wedge of key `bit` within a pad's square of half-size h.
+void outline_wedge(Gfx &d, const keypad::Pad &p, uint8_t bit, int h, uint16_t color) {
+  const int cx = p.cx, cy = p.cy;
+  if (p.kind == keypad::PadKind::kArrows) {
+    const int dx = bit == m8proto::kKeyLeft ? -1 : bit == m8proto::kKeyRight ? 1 : 0;
+    const int dy = bit == m8proto::kKeyUp ? -1 : bit == m8proto::kKeyDown ? 1 : 0;
+    const int pts[3][2] = {{cx, cy},
+                           {cx + (dx ? dx : -1) * h, cy + (dy ? dy : -1) * h},
+                           {cx + (dx ? dx : 1) * h, cy + (dy ? dy : 1) * h}};
+    draw_outline(d, pts, 3, color);
+    return;
+  }
+  const int t = h * 577 / 1000; // where the PLAY wedge's edges meet the square's sides
+  if (bit == m8proto::kKeyStart) {
+    const int pts[5][2] = {{cx, cy}, {cx - h, cy + t}, {cx - h, cy + h}, {cx + h, cy + h},
+                           {cx + h, cy + t}};
+    draw_outline(d, pts, 5, color);
+  } else {
+    const int side = bit == m8proto::kKeyOpt ? -1 : 1;
+    const int pts[4][2] = {{cx, cy}, {cx, cy - h}, {cx + side * h, cy - h}, {cx + side * h, cy + t}};
+    draw_outline(d, pts, 4, color);
+  }
+}
+
+// Draws a pad, its held keys lit. The caller clears the background.
+void draw_pad(Gfx &d, const keypad::Pad &p, uint8_t held) {
+  const bool arrows = p.kind == keypad::PadKind::kArrows;
+  const PadKey *keys = arrows ? kArrowKeys : kTriangleKeys;
+  const int n = arrows ? 4 : 3;
+  for (int i = 0; i < n; i++) {
+    const bool down = held & keys[i].bit;
+    if (down) outline_wedge(d, p, keys[i].bit, p.half - kPressInset, kKeyPressed);
+    draw_icon(d, keys[i].icon, p.cx + (int)(keys[i].dx * p.icon_offset),
+              p.cy + (int)(keys[i].dy * p.icon_offset), p.icon_size,
+              down ? kKeyPressed : kKeyPurple);
+  }
+}
+
+// Key layout icon: a device outline with an arrow diamond and a key triangle in it.
+void draw_layout_icon(Gfx &d, int cx, int cy, uint16_t color) {
+  d.drawRoundRect(cx - 22, cy - 14, 44, 28, 5, color);
+  d.drawRoundRect(cx - 21, cy - 13, 42, 26, 4, color);
+  const int ax = cx - 10;
+  d.fillCircle(ax, cy - 6, 2, color);
+  d.fillCircle(ax, cy + 6, 2, color);
+  d.fillCircle(ax - 6, cy, 2, color);
+  d.fillCircle(ax + 6, cy, 2, color);
+  d.fillCircle(cx + 6, cy - 4, 2, color);
+  d.fillCircle(cx + 14, cy - 4, 2, color);
+  d.fillCircle(cx + 10, cy + 5, 2, color);
 }
 
 void paint_row(Gfx &d, const Layout &l, const Controls &c) {
@@ -968,7 +1059,10 @@ void paint_row(Gfx &d, const Layout &l, const Controls &c) {
     if (c.message) {
       draw_panel_text(d, l, c.message);
     } else {
-      draw_arrow_pad(d, l, c.arrows);
+      const keypad::Table &t = keypad::table();
+      for (int i = 0; i < t.pad_count; i++) {
+        if (t.pads[i].in_panel) draw_pad(d, t.pads[i], c.arrows);
+      }
     }
   }
 }
@@ -979,7 +1073,7 @@ bool same(const Status &a, const Status &b) {
          a.oversized == b.oversized && a.volume == b.volume && a.headphones == b.headphones &&
          a.popup == b.popup && a.power == b.power && a.battery == b.battery &&
          a.power_mw == b.power_mw && a.rotation_locked == b.rotation_locked &&
-         a.message == b.message;
+         a.compact_keys == b.compact_keys && a.message == b.message;
 }
 
 bool same(const Controls &a, const Controls &b) {
@@ -993,7 +1087,8 @@ void apply_layout(Orientation o) {
   cur_orientation = o;
   layout_ptr = landscape ? &kLandscape : &kPortrait;
   keypad::set_arrangement(landscape ? keypad::Arrangement::kLandscape
-                                    : keypad::Arrangement::kPortrait);
+                                    : keypad::Arrangement::kPortrait,
+                          compact);
 
   auto &d = display();
   d.setRotation((base_rotation + (int)o) & 3);
@@ -1021,7 +1116,8 @@ void apply_layout(Orientation o) {
 
 } // namespace
 
-bool begin(Orientation orientation) {
+bool begin(Orientation orientation, bool compact_keys) {
+  compact = compact_keys;
   auto &d = display();
   // The portrait base: rotations 0/2 and 1/3 differ by 90 degrees.
   base_rotation = d.getRotation();
@@ -1039,6 +1135,12 @@ void set_backlight(uint8_t level) { display().setBrightness(level); }
 
 void set_orientation(Orientation orientation) {
   if (orientation != cur_orientation) apply_layout(orientation);
+}
+
+void set_compact_keys(bool on) {
+  if (on == compact) return;
+  compact = on;
+  apply_layout(cur_orientation);
 }
 
 Orientation orientation() { return cur_orientation; }
@@ -1105,6 +1207,13 @@ void draw_keys(uint8_t pressed_mask, bool force) {
     const keypad::Key &k = t.keys[i];
     const bool down = pressed_mask & k.bit;
     if (force || down != (bool)(drawn_mask & k.bit)) draw_key(d, k, down);
+  }
+  for (int i = 0; i < t.pad_count; i++) {
+    const keypad::Pad &p = t.pads[i];
+    if (p.in_panel) continue; // drawn with the panel (draw_controls)
+    if (!force && !((pressed_mask ^ drawn_mask) & keypad::pad_keys(p))) continue;
+    d.fillRect(p.cx - p.half, p.cy - p.half, 2 * p.half, 2 * p.half, kBg);
+    draw_pad(d, p, pressed_mask);
   }
   d.endWrite();
   drawn_mask = pressed_mask;
@@ -1173,7 +1282,8 @@ void draw_status(const Status &s) {
                         : i == kIconBrightness ? Popup::kBrightness
                         : i == kIconPower      ? Popup::kPower
                                                : Popup::kNone;
-    draw_icon_zone(d, cx, cy, owner != Popup::kNone && s.popup == owner);
+    const bool lit = i == kIconKeys ? s.compact_keys : owner != Popup::kNone && s.popup == owner;
+    draw_icon_zone(d, cx, cy, lit);
     switch (i) {
     case kIconVolume:
       if (s.headphones) {
@@ -1190,6 +1300,9 @@ void draw_status(const Status &s) {
       break;
     case kIconPower:
       draw_power_icon(d, s, cx, cy);
+      break;
+    case kIconKeys:
+      draw_layout_icon(d, cx, cy, kKeyLabel);
       break;
     }
   }
@@ -1231,6 +1344,7 @@ Hit hit_test(int x, int y, Popup open, int *value) {
       return i == kIconVolume       ? Hit::kVolumeIcon
              : i == kIconBrightness ? Hit::kBrightnessIcon
              : i == kIconRotation   ? Hit::kRotationIcon
+             : i == kIconKeys       ? Hit::kKeysIcon
                                     : Hit::kPowerIcon;
     }
   }
@@ -1265,16 +1379,14 @@ int slider_value(int x, int y, Popup open) {
 
 bool in_swipe_area(int x, int y) { return L().swipe.contains(x, y); }
 
-uint8_t arrow_at(int x, int y) {
-  if (!pad_shown) return 0;
-  const Layout &l = L();
-  if (x < l.row.x || x >= l.row.x + l.row.w + kPadReach || y < l.row.y ||
-      y >= l.row.y + l.row.h) {
-    return 0;
+uint8_t pad_key_at(int x, int y) {
+  const keypad::Table &t = keypad::table();
+  for (int i = 0; i < t.pad_count; i++) {
+    const keypad::Pad &p = t.pads[i];
+    if (p.in_panel && !pad_shown) continue;
+    if (const uint8_t key = keypad::pad_key(p, x, y)) return key;
   }
-  const int dx = x - (l.row.x + l.row.w / 2), dy = y - (l.row.y + l.row.h / 2);
-  if (abs(dx) > abs(dy)) return dx > 0 ? m8proto::kKeyRight : m8proto::kKeyLeft;
-  return dy > 0 ? m8proto::kKeyDown : m8proto::kKeyUp;
+  return 0;
 }
 
 } // namespace ui
