@@ -62,8 +62,12 @@ Orientation orientation();
 // Brightness level (kBrightnessMin..kBrightnessMax) to backlight PWM level.
 uint8_t backlight_for(int brightness);
 
-// Draws changed rows of the M8 framebuffer, scaled.
+// Draws changed rows of the M8 framebuffer, scaled. May wait (up to one display refresh) so
+// the write doesn't cross the panel's scan.
 void flush_m8();
+
+// Logs M8 drawing performance since the last call.
+void log_display_stats();
 
 // Redraws keys whose pressed state changed (or all, if `force`).
 void draw_keys(uint8_t pressed_mask, bool force = false);

@@ -5,13 +5,26 @@
 // integer scales that's a plain pixel copy; otherwise only the pixels on M8 pixel edges blend,
 // so the M8's fonts stay sharp with even stroke widths.
 //
-// The M8 screen is scaled in chunks of rows into an off-screen buffer, then pushed to the
-// display. Nothing else overlaps it.
+// The M8 screen bypasses M5GFX: it's scaled in the panel's own (portrait) orientation, whatever
+// the UI's rotation, into small buffers in internal RAM, and the DSI driver's 2D DMA copies
+// those into the panel's framebuffer (PSRAM). The CPU never writes the framebuffer itself:
+// pushing that much data through the cache, which both cores share, slowed the other core's
+// USB audio enough to drop packets.
+// The panel reads that framebuffer continuously (about 57 times a second), so each update is
+// timed against its scan: written before the scan reaches it, or just after the scan has
+// passed, never across the scan. Otherwise one refresh would show half an old M8 frame and
+// half a new one, which breaks up the moving oscilloscope.
 #include "display/ui.h"
 
 #include <M5Unified.h>
 #include <atomic>
+#include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
+#include <esp_heap_caps.h>
+#include <esp_lcd_mipi_dsi.h>
+#include <esp_lcd_panel_ops.h>
 #include <esp_log.h>
+#include <esp_rom_sys.h>
+#include <esp_timer.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,9 +150,6 @@ M5GFX &display() { return M5.Display; }
 // Scaling
 // ---------------------------------------------------------------------------
 
-constexpr int kChunkRows = 24;
-M5Canvas canvas(&M5.Display);
-
 uint16_t col_src[LAND_M8_W > PORT_M8_W ? LAND_M8_W : PORT_M8_W];
 uint16_t col_wt[sizeof(col_src) / sizeof(col_src[0])]; // weight of col_src, 0..256
 uint16_t row_src[LAND_M8_H > PORT_M8_H ? LAND_M8_H : PORT_M8_H];
@@ -169,43 +179,340 @@ inline uint16_t blend565(uint16_t a, uint16_t b, int w) {
   return (uint16_t)(mix | (mix >> 16));
 }
 
-// Scales output row `r` of the M8 rectangle into `dst` (byte-swapped, as M5Canvas stores it).
-void scale_row(int r, uint16_t *dst, const uint16_t *fb, int fb_w, int vis_w, int vis_h) {
-  const int w = L().m8.w;
-  const int j0 = row_src[r];
-  const int j1 = j0 + 1 < vis_h ? j0 + 1 : j0;
-  const int rw = row_wt[r];
-  const uint16_t *s0 = fb + j0 * fb_w;
-  const uint16_t *s1 = fb + j1 * fb_w;
-  for (int x = 0; x < w; x++) {
-    const int i0 = col_src[x];
-    const int i1 = i0 + 1 < vis_w ? i0 + 1 : i0;
-    const int cw = col_wt[x];
-    uint16_t p;
-    if (rw >= 256) {
-      p = blend565(s0[i0], s0[i1], cw);
-    } else {
-      p = blend565(blend565(s0[i0], s0[i1], cw), blend565(s1[i0], s1[i1], cw), rw);
-    }
-    dst[x] = (uint16_t)((p >> 8) | (p << 8));
+// The M8 framebuffer, as the scaler reads it.
+struct Source {
+  const uint16_t *px;
+  int stride;       // pixels per row
+  int vis_w, vis_h; // the part shown (320x240 of a larger Model:02 screen)
+};
+
+Source source() {
+  const int w = m8screen::width(), h = m8screen::height();
+  return {m8screen::framebuffer(), w, w < M8_SCREEN_W ? w : M8_SCREEN_W,
+          h < M8_SCREEN_H ? h : M8_SCREEN_H};
+}
+
+// `n` scaled pixels along output row `oy`, from output column `ox` in steps of `step`.
+void span_along_row(uint16_t *dst, int n, const Source &s, int oy, int ox, int step) {
+  const int j0 = row_src[oy];
+  const int j1 = j0 + 1 < s.vis_h ? j0 + 1 : j0;
+  const int rw = row_wt[oy];
+  const uint16_t *s0 = s.px + j0 * s.stride;
+  const uint16_t *s1 = s.px + j1 * s.stride;
+  for (int k = 0; k < n; k++, ox += step) {
+    const int i0 = col_src[ox];
+    const int i1 = i0 + 1 < s.vis_w ? i0 + 1 : i0;
+    const int cw = col_wt[ox];
+    uint16_t p = blend565(s0[i0], s0[i1], cw);
+    if (rw < 256) p = blend565(p, blend565(s1[i0], s1[i1], cw), rw);
+    dst[k] = p;
   }
 }
 
-// Draws output rows [r0, r1) of the M8 rectangle.
-void render_rows(int r0, int r1) {
-  const Layout &l = L();
-  const uint16_t *fb = m8screen::framebuffer();
-  const int fb_w = m8screen::width();
-  const int vis_w = fb_w < M8_SCREEN_W ? fb_w : M8_SCREEN_W;
-  const int vis_h = m8screen::height() < M8_SCREEN_H ? m8screen::height() : M8_SCREEN_H;
-  uint16_t *buf = (uint16_t *)canvas.getBuffer();
-  if (!buf) return;
-
-  for (int r = r0; r < r1; r += kChunkRows) {
-    const int rows = r1 - r < kChunkRows ? r1 - r : kChunkRows;
-    for (int i = 0; i < rows; i++) scale_row(r + i, buf + i * l.m8.w, fb, fb_w, vis_w, vis_h);
-    display().pushImage(l.m8.x, l.m8.y + r, l.m8.w, rows, (const lgfx::swap565_t *)buf);
+// `n` scaled pixels along output column `ox`, from output row `oy` in steps of `step`.
+void span_along_col(uint16_t *dst, int n, const Source &s, int ox, int oy, int step) {
+  const int i0 = col_src[ox];
+  const int i1 = i0 + 1 < s.vis_w ? i0 + 1 : i0;
+  const int cw = col_wt[ox];
+  for (int k = 0; k < n; k++, oy += step) {
+    const int j0 = row_src[oy];
+    const int rw = row_wt[oy];
+    const uint16_t *s0 = s.px + j0 * s.stride;
+    uint16_t p = blend565(s0[i0], s0[i1], cw);
+    if (rw < 256) {
+      const uint16_t *s1 = s.px + (j0 + 1 < s.vis_h ? j0 + 1 : j0) * s.stride;
+      p = blend565(p, blend565(s1[i0], s1[i1], cw), rw);
+    }
+    dst[k] = p;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The panel's framebuffer, and its scan
+// ---------------------------------------------------------------------------
+
+// Reaches Panel_DSI's esp_lcd handle (protected) to register the frame callback.
+struct DsiAccess : lgfx::Panel_DSI {
+  static esp_lcd_panel_handle_t handle(lgfx::Panel_DSI *p) {
+    return p->*(&DsiAccess::_disp_panel_handle);
+  }
+};
+
+struct Native {
+  esp_lcd_panel_handle_t panel;
+  int w, h;        // panel size
+  int rot;         // M5GFX's internal rotation: how UI coordinates map to the panel's
+  int blank_lines; // lines from the end-of-frame event to the first visible line
+  int total_lines; // visible + blank: one refresh
+} nat;
+
+// End of each refresh, from the DSI driver's interrupt. (On P4 chips before revision 3 there's
+// no true VSYNC interrupt; the driver signals when the DMA has sent the last line of a frame.)
+// 32-bit microseconds (wrapping), so the task never reads a half-written value.
+std::atomic<uint32_t> frame_end_us{0};
+std::atomic<uint32_t> frame_us{0}; // measured refresh period
+
+uint32_t now_us() { return (uint32_t)esp_timer_get_time(); }
+
+bool IRAM_ATTR on_frame_sent(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *) {
+  const uint32_t now = (uint32_t)esp_timer_get_time();
+  const uint32_t last = frame_end_us.load(std::memory_order_relaxed);
+  if (last) {
+    const uint32_t period = now - last;
+    if (period > 5000 && period < 50000) frame_us.store(period, std::memory_order_relaxed);
+  }
+  frame_end_us.store(now ? now : 1, std::memory_order_relaxed);
+  return false;
+}
+
+// Two internal-RAM buffers: one is scaled into while the DMA copies the other.
+constexpr int kDmaBufPx = 16384; // 32 KB each
+uint16_t *dma_buf[2];
+SemaphoreHandle_t copy_done;
+bool copy_pending;
+
+bool IRAM_ATTR on_copy_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *) {
+  BaseType_t woken = pdFALSE;
+  xSemaphoreGiveFromISR(copy_done, &woken);
+  return woken == pdTRUE;
+}
+
+void wait_copy() {
+  if (!copy_pending) return;
+  if (xSemaphoreTake(copy_done, pdMS_TO_TICKS(100)) != pdTRUE) ESP_LOGW(TAG, "DMA copy timed out");
+  copy_pending = false;
+}
+
+bool init_native() {
+  auto *panel = display().getPanel();
+  if (!panel || !panel->getBus() || panel->getBus()->busType() != lgfx::bus_type_t::bus_dsi) {
+    ESP_LOGE(TAG, "display is not a DSI panel");
+    return false;
+  }
+  auto *dsi = static_cast<lgfx::Panel_DSI *>(panel);
+  const auto &det = dsi->config_detail();
+  nat.panel = DsiAccess::handle(dsi);
+  nat.w = panel->config().panel_width;
+  nat.h = panel->config().panel_height;
+  nat.blank_lines = det.vsync_front_porch + det.vsync_pulse_width + det.vsync_back_porch;
+  nat.total_lines = nat.h + nat.blank_lines;
+  for (auto &b : dma_buf) {
+    b = (uint16_t *)heap_caps_aligned_alloc(128, kDmaBufPx * sizeof(uint16_t),
+                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+  }
+  copy_done = xSemaphoreCreateBinary();
+  if (!nat.panel || !dma_buf[0] || !dma_buf[1] || !copy_done) {
+    ESP_LOGE(TAG, "M8 screen setup failed");
+    nat.panel = nullptr;
+    return false;
+  }
+
+  esp_lcd_dpi_panel_event_callbacks_t cbs = {};
+  cbs.on_vsync = on_frame_sent;
+  cbs.on_color_trans_done = on_copy_done;
+  const esp_err_t err = esp_lcd_dpi_panel_register_event_callbacks(nat.panel, &cbs, nullptr);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "DSI callbacks: %s", esp_err_to_name(err));
+    nat.panel = nullptr;
+    return false;
+  }
+  ESP_LOGI(TAG, "panel %dx%d, %d blank lines", nat.w, nat.h, nat.blank_lines);
+  return true;
+}
+
+// UI (rotated) coordinates <-> panel coordinates, as M5GFX's Panel_FrameBufferBase maps them.
+struct NRect {
+  int x, y, w, h;
+};
+
+NRect to_native(const Layout &l, const Rect &r) {
+  switch (nat.rot) {
+  case 1:
+    return {l.height - (r.y + r.h), r.x, r.h, r.w};
+  case 2:
+    return {l.width - (r.x + r.w), l.height - (r.y + r.h), r.w, r.h};
+  case 3:
+    return {r.y, l.width - (r.x + r.w), r.h, r.w};
+  default:
+    return {r.x, r.y, r.w, r.h};
+  }
+}
+
+// Scales panel rows [y0, y1), columns [x0, x0 + w), which must lie in the M8 rectangle, into
+// `dst` (w pixels per row).
+void render_native(uint16_t *dst, const Layout &l, const Source &s, int y0, int y1, int x0, int w) {
+  for (int ny = y0; ny < y1; ny++, dst += w) {
+    switch (nat.rot) { // output coordinates of the panel pixel (x0, ny), and the step along x
+    case 1:
+      span_along_col(dst, w, s, ny - l.m8.x, l.height - 1 - x0 - l.m8.y, -1);
+      break;
+    case 2:
+      span_along_row(dst, w, s, l.height - 1 - ny - l.m8.y, l.width - 1 - x0 - l.m8.x, -1);
+      break;
+    case 3:
+      span_along_col(dst, w, s, l.width - 1 - ny - l.m8.x, x0 - l.m8.y, 1);
+      break;
+    default:
+      span_along_row(dst, w, s, ny - l.m8.y, x0 - l.m8.x, 1);
+      break;
+    }
+  }
+}
+
+// What flush_m8() has done, for log_display_stats().
+struct {
+  uint32_t flushes, ahead, waits, unsynced, too_big;
+  uint32_t late; // timed writes that took longer than the scan gave them
+  uint64_t px, write_us, wait_us;
+  uint64_t render_us, copy_wait_us; // write time scaling (CPU), and waiting for the DMA
+} stats;
+
+// Scales panel rectangles and has the DMA copy them into the framebuffer, in bands of panel
+// rows from the top (the order the panel scans), scaling each piece while the last is copied.
+void write_rects(const Layout &l, const Source &s, const NRect *rects, int count, int ny0, int ny1,
+                 int band_rows) {
+  static int next_buf = 0;
+  for (int y = ny0; y < ny1; y += band_rows) {
+    const int yb = y + band_rows;
+    for (int i = 0; i < count; i++) {
+      const NRect &n = rects[i];
+      const int y0 = y > n.y ? y : n.y;
+      const int y1 = yb < n.y + n.h ? yb : n.y + n.h;
+      if (y0 >= y1) continue;
+      uint16_t *buf = dma_buf[next_buf];
+      next_buf ^= 1;
+      const int64_t t0 = esp_timer_get_time();
+      render_native(buf, l, s, y0, y1, n.x, n.w); // the other buffer may still be copying
+      const int64_t t1 = esp_timer_get_time();
+      wait_copy();
+      stats.render_us += t1 - t0;
+      stats.copy_wait_us += esp_timer_get_time() - t1;
+      if (esp_lcd_panel_draw_bitmap(nat.panel, n.x, y0, n.x + n.w, y1, buf) == ESP_OK) {
+        copy_pending = true;
+      }
+    }
+  }
+}
+
+// Scan timing. Positions are in lines since the last end-of-frame event: the blank lines come
+// first, then panel row r at blank_lines + r.
+constexpr int kScanMarginLines = 32; // slack for timing jitter and the DSI FIFO
+float ns_per_px = 15;                // measured write cost, refined as we go
+
+struct Scan {
+  bool valid;
+  int line;      // current position
+  float line_us; // duration of one line
+};
+
+Scan scan_now() {
+  const uint32_t end = frame_end_us.load(std::memory_order_relaxed);
+  const uint32_t period = frame_us.load(std::memory_order_relaxed);
+  if (!end || !period) return {false, 0, 0};
+  const float line_us = (float)period / nat.total_lines;
+  const uint32_t since = now_us() - end;
+  if (since > 2 * period) return {false, 0, 0}; // the callback has stopped
+  return {true, (int)(since / line_us) % nat.total_lines, line_us};
+}
+
+// Sleeps for most of a long wait, then spins for the rest (the tick is 1 ms).
+void wait_us(int64_t us) {
+  if (us <= 0) return;
+  const int64_t until = esp_timer_get_time() + us;
+  if (us > 2000) vTaskDelay(pdMS_TO_TICKS((us - 1000) / 1000));
+  while (esp_timer_get_time() < until) {
+  }
+}
+
+int mod(int a, int n) { return ((a % n) + n) % n; }
+
+// An area of the M8 rectangle to redraw, in output pixels.
+struct Run {
+  int r0, r1; // rows
+  int c0, c1; // columns
+};
+
+// Writes the runs, timed against the panel's scan so a refresh never shows part of an update.
+// The runs cover panel rows [ny0, ny1), written in scan order, either:
+// - ahead of the scan: started before the scan reaches the area, when writing a row is faster
+//   than the scan moves on a row, so the scan never catches up; or
+// - between scans: all of it while the scan is elsewhere.
+// If the scan is in the way, wait for it to pass the area (at most one refresh).
+void write_runs(const Run *runs, int count) {
+  const Layout &l = L();
+  const Source s = source();
+  int ny0 = nat.h, ny1 = 0, max_w = 1;
+  int64_t px = 0;
+  NRect rects[16];
+  for (int i = 0; i < count; i++) {
+    const Run &r = runs[i];
+    rects[i] = to_native(l, {l.m8.x + r.c0, l.m8.y + r.r0, r.c1 - r.c0, r.r1 - r.r0});
+    const NRect &n = rects[i];
+    if (n.y < ny0) ny0 = n.y;
+    if (n.y + n.h > ny1) ny1 = n.y + n.h;
+    if (n.w > max_w) max_w = n.w;
+    px += (int64_t)n.w * n.h;
+  }
+  if (!px) return;
+  int band_rows = kDmaBufPx / max_w;
+  if (band_rows > 64) band_rows = 64; // small bands: the first lands soon after starting
+  if (band_rows < 1) band_rows = 1;
+
+  // With headroom: the per-pixel cost varies from update to update.
+  const float est_us = px * ns_per_px * 1.3f / 1000.0f + 150;
+  const float row_us = est_us / (ny1 - ny0);  // average write time per panel row
+  const float lead_us = row_us * band_rows + 100; // until the first band has landed
+
+  int64_t waited = 0;
+  bool timed = false;
+  int deadline_start = 0; // where the scan enters the area, to check the write beat it
+  const Scan sc = scan_now();
+  if (!sc.valid) {
+    stats.unsynced++;
+  } else {
+    const int total = nat.total_lines;
+    const int start = nat.blank_lines + ny0 - kScanMarginLines; // the scan enters the area
+    const int span = ny1 - ny0 + 2 * kScanMarginLines;          // and leaves it this much later
+    const float window_us = (total - span) * sc.line_us;        // time it's away
+    const bool outrun = row_us < 0.8f * sc.line_us;             // writes stay ahead of the scan
+    const float needed_us = outrun ? lead_us : est_us; // head start needed before it arrives
+    if (needed_us > window_us) {
+      stats.too_big++; // can't avoid the scan (e.g. a full landscape redraw): just write
+    } else {
+      const bool inside = mod(sc.line - start, total) < span;
+      const int until_enter = mod(start - sc.line, total);
+      if (inside || until_enter * sc.line_us <= needed_us) {
+        const int lines = mod(start + span - sc.line, total);
+        const int64_t t0 = esp_timer_get_time();
+        wait_us((int64_t)(lines * sc.line_us));
+        waited = esp_timer_get_time() - t0;
+        stats.waits++;
+      }
+      if (outrun && est_us > window_us) {
+        stats.ahead++;
+      } else {
+        timed = true;
+        deadline_start = start;
+      }
+    }
+  }
+
+  // For a write between scans: how long until the scan reaches the area, from now.
+  float deadline_us = 0;
+  if (timed) {
+    const Scan now = scan_now();
+    deadline_us = mod(deadline_start - now.line, nat.total_lines) * now.line_us;
+  }
+  const int64_t t0 = esp_timer_get_time();
+  write_rects(l, s, rects, count, ny0, ny1, band_rows);
+  wait_copy();
+  const int64_t dt = esp_timer_get_time() - t0;
+  if (timed && dt > deadline_us) stats.late++;
+  if (px > 2000) ns_per_px = ns_per_px * 0.9f + (dt * 1000.0f / px) * 0.1f;
+  stats.flushes++;
+  stats.px += px;
+  stats.write_us += dt;
+  stats.wait_us += waited;
 }
 
 // ---------------------------------------------------------------------------
@@ -624,15 +931,9 @@ void apply_layout(Orientation o) {
   }
 
   const Layout &l = L();
+  nat.rot = (d.getRotation() + d.getPanel()->config().offset_rotation) & 3;
   build_axis(col_src, col_wt, l.m8.w, M8_SCREEN_W);
   build_axis(row_src, row_wt, l.m8.h, M8_SCREEN_H);
-  canvas.deleteSprite();
-  canvas.setColorDepth(16);
-  canvas.setPsram(false);
-  if (!canvas.createSprite(l.m8.w, kChunkRows)) {
-    canvas.setPsram(true);
-    if (!canvas.createSprite(l.m8.w, kChunkRows)) ESP_LOGE(TAG, "canvas allocation failed");
-  }
 
   d.fillScreen(kBg);
   status_drawn = false;
@@ -653,9 +954,10 @@ bool begin(Orientation orientation) {
 #if defined(TAB5_ROTATE_180) && TAB5_ROTATE_180
   base_rotation ^= 2;
 #endif
+  const bool ok = init_native();
   apply_layout(orientation);
   set_backlight(255);
-  return canvas.getBuffer() != nullptr;
+  return ok;
 }
 
 void set_backlight(uint8_t level) { display().setBrightness(level); }
@@ -667,40 +969,57 @@ void set_orientation(Orientation orientation) {
 Orientation orientation() { return cur_orientation; }
 
 void flush_m8() {
-  const uint64_t bands = m8screen::take_dirty_bands();
+  if (!nat.panel) return;
+  static m8screen::DirtyColumns cols[64];
+  const uint64_t bands = m8screen::take_dirty(cols);
   if (!bands) return;
 
   const Layout &l = L();
-  const int vis_h = m8screen::height() < M8_SCREEN_H ? m8screen::height() : M8_SCREEN_H;
-  const int band_count = (vis_h + m8screen::kBandRows - 1) / m8screen::kBandRows;
+  const Source src = source();
+  const int band_count = (src.vis_h + m8screen::kBandRows - 1) / m8screen::kBandRows;
 
-  // Each dirty band of M8 rows maps to a range of output rows (plus one either side, which
-  // may blend with it); merge overlapping ranges and draw them.
-  auto &d = display();
-  d.startWrite();
-  int run0 = -1, run1 = -1;
-  for (int b = 0; b <= band_count; b++) {
-    const bool dirty = b < band_count && (bands & (1ULL << b));
-    if (dirty) {
-      const int y0 = b * m8screen::kBandRows;
-      const int y1 = y0 + m8screen::kBandRows < vis_h ? y0 + m8screen::kBandRows : vis_h;
-      int r0 = y0 * l.m8.h / M8_SCREEN_H - 1;
-      int r1 = (y1 * l.m8.h + M8_SCREEN_H - 1) / M8_SCREEN_H + 1;
-      if (r0 < 0) r0 = 0;
-      if (r1 > l.m8.h) r1 = l.m8.h;
-      if (run0 >= 0 && r0 <= run1) {
-        run1 = r1 > run1 ? r1 : run1;
-        continue;
-      }
-      if (run0 >= 0) render_rows(run0, run1);
-      run0 = r0;
-      run1 = r1;
-    } else if (run0 >= 0) {
-      render_rows(run0, run1);
-      run0 = -1;
+  // Each dirty band of M8 rows (and its dirty columns) maps to an area of output pixels, plus
+  // one either side, which may blend with it. Merge vertically overlapping areas.
+  Run runs[16];
+  int count = 0;
+  for (int b = 0; b < band_count; b++) {
+    if (!(bands & (1ULL << b))) continue;
+    const int y0 = b * m8screen::kBandRows;
+    const int y1 = y0 + m8screen::kBandRows < src.vis_h ? y0 + m8screen::kBandRows : src.vis_h;
+    const int x0 = cols[b].x0;
+    const int x1 = cols[b].x1 < src.vis_w ? cols[b].x1 : src.vis_w;
+    if (x0 >= x1) continue; // only off-screen columns of a larger (Model:02) screen
+    Run r = {y0 * l.m8.h / M8_SCREEN_H - 1, (y1 * l.m8.h + M8_SCREEN_H - 1) / M8_SCREEN_H + 1,
+             x0 * l.m8.w / M8_SCREEN_W - 1, (x1 * l.m8.w + M8_SCREEN_W - 1) / M8_SCREEN_W + 1};
+    if (r.r0 < 0) r.r0 = 0;
+    if (r.r1 > l.m8.h) r.r1 = l.m8.h;
+    if (r.c0 < 0) r.c0 = 0;
+    if (r.c1 > l.m8.w) r.c1 = l.m8.w;
+    if (count && (r.r0 <= runs[count - 1].r1 || count == 16)) {
+      Run &last = runs[count - 1];
+      if (r.r1 > last.r1) last.r1 = r.r1;
+      if (r.c0 < last.c0) last.c0 = r.c0;
+      if (r.c1 > last.c1) last.c1 = r.c1;
+    } else {
+      runs[count++] = r;
     }
   }
-  d.endWrite();
+  write_runs(runs, count);
+}
+
+void log_display_stats() {
+  const uint32_t n = stats.flushes ? stats.flushes : 1;
+  ESP_LOGI(TAG,
+           "display: %lu M8 updates, avg %llu px in %llu us (%.1f ns/px; scaling %llu us, "
+           "waiting for DMA %llu us), %lu written ahead of the scan, %lu waited for it (avg %llu "
+           "us), %lu late, %lu too big to time, %lu untimed; refresh %ld us",
+           (unsigned long)stats.flushes, stats.px / n, stats.write_us / n, ns_per_px,
+           stats.render_us / n, stats.copy_wait_us / n, (unsigned long)stats.ahead,
+           (unsigned long)stats.waits, stats.waits ? stats.wait_us / stats.waits : 0,
+           (unsigned long)stats.late,
+           (unsigned long)stats.too_big, (unsigned long)stats.unsynced,
+           (long)frame_us.load());
+  stats = {};
 }
 
 void draw_keys(uint8_t pressed_mask, bool force) {

@@ -131,11 +131,12 @@ void poll_jack_detect(uint32_t now) {
   settings_changed = true;
 }
 
-// Reports how far audio is getting: USB packets in, the loudest sample received, and the
-// playback buffer. Logged every few seconds for a while after the M8 connects.
-void log_audio(uint32_t now, uint32_t connected_at) {
+// Reports how far audio is getting (USB packets in, the loudest sample received, the playback
+// buffer) and how M8 drawing is keeping up. Logged every few seconds for a while after the M8
+// connects or the screen rotates.
+void log_audio(uint32_t now, uint32_t log_from) {
   static uint32_t logged_at = 0;
-  if (!connected_at || now - connected_at > kAudioLogForMs) return;
+  if (!log_from || now - log_from > kAudioLogForMs) return;
   if (now - logged_at < kAudioLogIntervalMs) return;
   logged_at = now;
   const m8usb::AudioStats a = m8usb::audio_stats();
@@ -146,6 +147,7 @@ void log_audio(uint32_t now, uint32_t connected_at) {
            (unsigned long)a.packets_failed, a.last_packet_status, (unsigned long)a.bytes,
            audio::take_peak(), (unsigned long)audio::buffered_ms(),
            (unsigned long)audio::underruns());
+  ui::log_display_stats();
 }
 
 ui::Status::Link link_for(m8usb::State s) {
@@ -184,7 +186,7 @@ void ui_task(void *) {
   uint32_t second_reset_at = 0;
   uint32_t settings_dirty_since = 0;
   uint32_t last_power_log = 0;
-  uint32_t connected_at = 0;
+  uint32_t log_from = 0; // when the audio/display report window started
   int applied_brightness = -1;
   uint32_t shown_log_version = logcap::version() - 1; // draw the log on the first frame
 
@@ -208,7 +210,7 @@ void ui_task(void *) {
     const uint32_t connections = m8usb::connection_count();
     if (connections != seen_connections) {
       seen_connections = connections;
-      connected_at = now ? now : 1;
+      log_from = now ? now : 1;
       m8proto::reset();
       m8screen::clear({0, 0, 0});
       send_cmd(m8proto::kCmdEnableDisplay);
@@ -231,8 +233,11 @@ void ui_task(void *) {
     }
 
     poll_jack_detect(now);
-    log_audio(now, connected_at);
-    if (poll_orientation(now)) settings_changed = true;
+    log_audio(now, log_from);
+    if (poll_orientation(now)) {
+      settings_changed = true;
+      log_from = now ? now : 1;
+    }
     if (brightness != applied_brightness) {
       applied_brightness = brightness;
       ui::set_backlight(ui::backlight_for(applied_brightness));

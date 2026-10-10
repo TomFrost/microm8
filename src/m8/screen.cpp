@@ -37,6 +37,9 @@ uint16_t *fb = nullptr;
 int fb_w = M8_SCREEN_W;
 int fb_h = M8_SCREEN_H;
 uint64_t dirty = 0;
+constexpr int kMaxBands = (kMaxH + kBandRows - 1) / kBandRows;
+static_assert(kMaxBands <= 64, "dirty band mask is 64 bits");
+DirtyColumns dirty_cols[kMaxBands];
 
 uint8_t hw_model = 0;
 int requested_font_mode = 0; // as sent by the M8 (0..2)
@@ -60,11 +63,23 @@ inline uint32_t rd32(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-void mark_rows(int y0, int y1) {
+// Marks rows [y0, y1] (inclusive), columns [x0, x1), for redraw.
+void mark(int x0, int x1, int y0, int y1) {
   if (y0 < 0) y0 = 0;
   if (y1 >= fb_h) y1 = fb_h - 1;
-  if (y0 > y1) return;
-  for (int b = y0 / kBandRows; b <= y1 / kBandRows; b++) dirty |= (1ULL << b);
+  if (x0 < 0) x0 = 0;
+  if (x1 > fb_w) x1 = fb_w;
+  if (y0 > y1 || x0 >= x1) return;
+  for (int b = y0 / kBandRows; b <= y1 / kBandRows; b++) {
+    DirtyColumns &c = dirty_cols[b];
+    if (!(dirty & (1ULL << b))) {
+      dirty |= (1ULL << b);
+      c = {(uint16_t)x0, (uint16_t)x1};
+    } else {
+      if (x0 < c.x0) c.x0 = (uint16_t)x0;
+      if (x1 > c.x1) c.x1 = (uint16_t)x1;
+    }
+  }
 }
 
 void fill(int x, int y, int w, int h, uint16_t color) {
@@ -84,7 +99,7 @@ void fill(int x, int y, int w, int h, uint16_t color) {
     uint16_t *p = fb + row * fb_w + x;
     for (int i = 0; i < w; i++) p[i] = color;
   }
-  mark_rows(y, y + h - 1);
+  mark(x, x + w, y, y + h - 1);
 }
 
 inline void plot(int x, int y, uint16_t color) {
@@ -143,7 +158,7 @@ void blit_glyph(const DecodedFont *f, char c, int x, int y, uint16_t fg) {
       if (mask & (1u << col)) plot(x + col, y + row, fg);
     }
   }
-  mark_rows(y, y + f->glyph_h - 1);
+  mark(x, x + f->glyph_w, y, y + f->glyph_h - 1);
 }
 
 void resize(int w, int h) {
@@ -277,16 +292,19 @@ int height() { return fb_h; }
 bool oversized() { return fb_w > M8_SCREEN_W || fb_h > M8_SCREEN_H; }
 const uint16_t *framebuffer() { return fb; }
 
-uint64_t take_dirty_bands() {
+uint64_t take_dirty_bands() { return take_dirty(nullptr); }
+
+uint64_t take_dirty(DirtyColumns *cols) {
   const uint64_t d = dirty;
+  if (cols) {
+    for (int b = 0; b < kMaxBands; b++) {
+      if (d & (1ULL << b)) cols[b] = dirty_cols[b];
+    }
+  }
   dirty = 0;
   return d;
 }
 
-void mark_all_dirty() { mark_rows(0, fb_h - 1); }
-
-void mark_dirty(int y0, int y1) {
-  if (y1 > y0) mark_rows(y0, y1 - 1);
-}
+void mark_all_dirty() { mark(0, fb_w, 0, fb_h - 1); }
 
 } // namespace m8screen
