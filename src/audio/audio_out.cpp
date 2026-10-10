@@ -102,32 +102,6 @@ void render(const int16_t *in, int16_t *out, Output output, int32_t gain) {
   }
 }
 
-// A short beep on the selected output at boot: confirms the audio hardware works
-// independently of USB audio.
-void boot_beep() {
-  constexpr int kFreq = 880;
-  constexpr int kMs = 120;
-  static int16_t in[kChunkFrames * 2];
-  static int16_t out[kChunkFrames * 2];
-  const Output output = cur_output.load();
-  const int32_t gain = level_to_gain_q12(levels[(int)output].load());
-  const int total = kSampleRate * kMs / 1000;
-  const int half_period = kSampleRate / (2 * kFreq);
-
-  for (int done = 0; done < total; done += kChunkFrames) {
-    for (int i = 0; i < kChunkFrames; i++) {
-      const int n = done + i;
-      // Square wave at -12 dBFS with a short fade in/out to avoid clicks.
-      int32_t s = ((n / half_period) & 1) ? 8192 : -8192;
-      const int edge = n < 400 ? n : (total - n < 400 ? total - n : 400);
-      s = s * (edge < 0 ? 0 : edge) / 400;
-      in[i * 2] = in[i * 2 + 1] = (int16_t)s;
-    }
-    render(in, out, output, gain);
-    audio_hw::write(out, kChunkFrames);
-  }
-}
-
 void audio_task(void *) {
   static int16_t in[(kChunkFrames + 1) * 2];
   static int16_t out[kChunkFrames * 2];
@@ -135,7 +109,6 @@ void audio_task(void *) {
 
   Output routed = cur_output.load();
   audio_hw::route(routed);
-  boot_beep();
 
   for (;;) {
     const Output output = cur_output.load(std::memory_order_relaxed);
