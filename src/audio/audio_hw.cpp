@@ -24,6 +24,14 @@ constexpr uint8_t kIoeInputReg = 0x0F;
 constexpr uint8_t kSpkEnBit = 1 << 1;
 constexpr uint8_t kHpDetBit = 1 << 7;
 
+// ES8388 output volume registers LOUT1, ROUT1, LOUT2, ROUT2 (46..49), in 1.5 dB steps:
+// 0x00 = -45 dB, 0x1E = 0 dB, 0x21 = +4.5 dB. Which pair feeds the speaker amp isn't
+// documented, and only one output plays at a time, so all four get the routed volume.
+constexpr uint8_t kRegOutVolFirst = 46;
+constexpr uint8_t kRegOutVolLast = 49;
+constexpr uint8_t kOutVolMax = 0x21;
+constexpr int kOutVolStepsPerLevel = 3; // 4.5 dB per volume level
+
 i2s_chan_handle_t tx;
 i2s_chan_handle_t rx; // for the mics; created but not enabled yet
 
@@ -108,6 +116,17 @@ void route(audio::Output output) {
   // The codec always drives the headphone jack; the speaker amp is switched on only when the
   // speaker is selected.
   set_speaker_amp(output == audio::Output::kSpeaker);
+}
+
+void set_volume(int level) {
+  // Level 10 = +4.5 dB (the previous fixed setting), 9 = 0 dB, 1 = -36 dB. Level 0 is digital
+  // silence in the audio engine; the codec also goes to its minimum.
+  int reg = level <= 0 ? 0 : kOutVolMax - (audio::kMaxVolume - level) * kOutVolStepsPerLevel;
+  if (reg < 0) reg = 0;
+  board::I2CLock lock;
+  for (uint8_t r = kRegOutVolFirst; r <= kRegOutVolLast; r++) {
+    M5.In_I2C.writeRegister8(TAB5_ES8388_ADDR, r, (uint8_t)reg, kI2cHz);
+  }
 }
 
 void write(const int16_t *stereo, int frames) {

@@ -24,6 +24,13 @@ constexpr uint32_t kPrebufferFrames = 1024; // ~23 ms before (re)starting playba
 constexpr uint32_t kLowFrames = 768;
 constexpr uint32_t kHighFrames = 2048;
 
+// Silence gate. The ES8388 appears to mute itself on exact digital silence, but stays active
+// (with an audible noise floor) while it receives even a few LSB of signal, and the M8 leaves
+// such low-level residue after playback stops. Once the input stays at or below this level
+// for kGateHoldFrames, the output becomes exact zeros; it reopens on the first louder chunk.
+constexpr int kGateThreshold = 8;                         // LSB peak, about -72 dBFS
+constexpr uint32_t kGateHoldFrames = kSampleRate / 4;     // 250 ms
+
 uint8_t *ring;
 std::atomic<uint32_t> head{0}; // written by producer
 std::atomic<uint32_t> tail{0}; // written by consumer
@@ -35,13 +42,17 @@ std::atomic<int> peak{0};
 
 int clamp_level(int level) { return level < 0 ? 0 : (level > kMaxVolume ? kMaxVolume : level); }
 
-int32_t level_to_gain_q12(int level) {
-  // Roughly perceptual: quadratic curve, unity at max.
-  return (int32_t)((level * level * 4096) / (kMaxVolume * kMaxVolume));
-}
+// Volume is applied in the codec's analog output stage (audio_hw::set_volume), which lowers
+// its noise floor along with the music. Samples stay at full scale; only level 0 is digital
+// silence.
+constexpr int32_t kUnityGain = 4096; // Q12
+int32_t digital_gain_q12(int level) { return level > 0 ? kUnityGain : 0; }
 
 inline int16_t scale(int32_t sample, int32_t gain_q12) {
-  sample = (sample * gain_q12) >> 12;
+  // Round symmetrically (half away from zero). A plain >> rounds towards minus infinity, which
+  // turns tiny negative samples into a persistent -1 at any volume.
+  const int32_t scaled = sample * gain_q12;
+  sample = (scaled + (scaled >= 0 ? 2048 : -2048)) / 4096;
   if (sample > 32767) return 32767;
   if (sample < -32768) return -32768;
   return (int16_t)sample;
@@ -102,10 +113,22 @@ void render(const int16_t *in, int16_t *out, Output output, int32_t gain) {
   }
 }
 
+// Largest absolute sample in one chunk of interleaved stereo input.
+int chunk_peak(const int16_t *in) {
+  int peak = 0;
+  for (int i = 0; i < kChunkFrames * 2; i++) {
+    const int a = in[i] < 0 ? -in[i] : in[i];
+    if (a > peak) peak = a;
+  }
+  return peak;
+}
+
 void audio_task(void *) {
   static int16_t in[(kChunkFrames + 1) * 2];
   static int16_t out[kChunkFrames * 2];
   bool playing = false;
+  uint32_t quiet_frames = kGateHoldFrames; // start gated: nothing has played yet
+  int applied_level = -1;                  // routed output's volume, as last sent to the codec
 
   Output routed = cur_output.load();
   audio_hw::route(routed);
@@ -116,9 +139,24 @@ void audio_task(void *) {
       routed = output;
       audio_hw::route(routed);
     }
+    const int level = levels[(int)output].load(std::memory_order_relaxed);
+    if (level != applied_level) {
+      applied_level = level;
+      audio_hw::set_volume(level);
+    }
 
-    if (read_chunk(in, playing)) {
-      render(in, out, output, level_to_gain_q12(levels[(int)output].load(std::memory_order_relaxed)));
+    bool audible = read_chunk(in, playing);
+    if (audible) {
+      if (chunk_peak(in) > kGateThreshold) {
+        quiet_frames = 0;
+      } else if (quiet_frames < kGateHoldFrames) {
+        quiet_frames += kChunkFrames;
+      }
+      audible = quiet_frames < kGateHoldFrames;
+    }
+
+    if (audible) {
+      render(in, out, output, digital_gain_q12(levels[(int)output].load(std::memory_order_relaxed)));
     } else {
       memset(out, 0, sizeof(out));
     }

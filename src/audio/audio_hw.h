@@ -15,6 +15,10 @@ bool has_headphones();
 // Routes audio to `output`, e.g. switching an amp or I2S port. Called from the audio task.
 void route(audio::Output output);
 
+// Sets the codec's analog output volume, 0..audio::kMaxVolume, for whichever output is
+// routed. Called from the audio task.
+void set_volume(int level);
+
 // Writes `frames` stereo frames (interleaved L/R) to the routed output. Blocks until the
 // hardware accepts them, which paces the audio task.
 void write(const int16_t *stereo, int frames);

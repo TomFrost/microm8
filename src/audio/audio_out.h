@@ -2,8 +2,8 @@
 // audio_hw.cpp).
 //
 // USB delivers 44.1 kHz S16LE stereo. The speaker is mono, so channels are mixed down for it;
-// headphones keep stereo. Only one output plays at a time, and each output
-// remembers its own volume.
+// headphones keep stereo. Only one output plays at a time, and each output remembers its own
+// volume, which is applied in the codec's analog output stage.
 //
 // The M8 and the ESP32's I2S clocks drift relative to each other, so the ring buffer level is
 // held near a target by occasionally dropping or repeating a single frame.
