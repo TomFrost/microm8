@@ -32,7 +32,6 @@ constexpr size_t kRxStreamBytes = 32 * 1024;
 constexpr uint32_t kFrameIntervalMs = 16; // cap LCD updates at ~60 Hz
 constexpr uint32_t kSettingsSaveDelayMs = 2000;
 constexpr uint32_t kJackDebounceMs = 100;
-constexpr uint32_t kAudioStatsIntervalMs = 5000;
 
 StreamBufferHandle_t rx_stream;
 Preferences prefs;
@@ -98,29 +97,6 @@ void show_disconnected(m8usb::State s) {
   }
 }
 
-// Logs a one-line audio health summary: what arrived over USB since the last call, the
-// playback buffer level, underruns and the loudest sample (0 means the M8 sent silence).
-void log_audio_stats() {
-  static m8usb::AudioStats prev{};
-  const m8usb::AudioStats s = m8usb::audio_stats();
-  ESP_LOGI(TAG,
-           "audio: streaming=%d urbs ok/fail %lu/%lu, packets ok/empty/fail %lu/%lu/%lu, "
-           "%lu bytes, buffer %lu ms, underruns %lu, peak %d, out=%s vol=%d",
-           (int)m8usb::audio_streaming(), (unsigned long)(s.urbs_ok - prev.urbs_ok),
-           (unsigned long)(s.urbs_failed - prev.urbs_failed),
-           (unsigned long)(s.packets_ok - prev.packets_ok),
-           (unsigned long)(s.packets_empty - prev.packets_empty),
-           (unsigned long)(s.packets_failed - prev.packets_failed),
-           (unsigned long)(s.bytes - prev.bytes), (unsigned long)audio::buffered_ms(),
-           (unsigned long)audio::underruns(), audio::take_peak(),
-           audio::output() == audio::Output::kHeadphones ? "hp" : "spk", audio::volume());
-  if (s.urbs_failed != prev.urbs_failed || s.packets_failed != prev.packets_failed) {
-    ESP_LOGW(TAG, "audio: last URB status %d, last packet status %d", s.last_urb_status,
-             s.last_packet_status);
-  }
-  prev = s;
-}
-
 void ui_task(void *) {
   static uint8_t buf[2048];
 
@@ -129,7 +105,6 @@ void ui_task(void *) {
   uint32_t last_frame = 0;
   uint32_t second_reset_at = 0;
   uint32_t settings_dirty_since = 0;
-  uint32_t last_audio_stats = 0;
   uint32_t shown_log_version = logcap::version() - 1; // draw the log on the first frame
 
   show_disconnected(last_state);
@@ -174,10 +149,6 @@ void ui_task(void *) {
     }
 
     poll_jack_detect(now);
-    if (state == m8usb::State::kConnected && now - last_audio_stats >= kAudioStatsIntervalMs) {
-      last_audio_stats = now;
-      log_audio_stats();
-    }
     if (audio_settings_changed.exchange(false)) settings_dirty_since = now ? now : 1;
     if (settings_dirty_since && now - settings_dirty_since >= kSettingsSaveDelayMs) {
       settings_dirty_since = 0;

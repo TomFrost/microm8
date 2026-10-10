@@ -34,7 +34,8 @@ To turn the layout upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.i
   hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Each key's touch area
   reaches halfway into the gap around it, so near misses still count without neighbouring
   keys overlapping.
-- **SPK / HP:** chooses the speaker or the headphone jack. Each output keeps its own volume.
+- **SPK / HP:** chooses the speaker or the headphone jack. Plugging headphones in switches to
+  them automatically, and unplugging switches back. Each output keeps its own volume.
 - **Volume:** `−`/`+` (0–10). Volumes and the selected output are saved to flash.
 
 ## Hardware setup
@@ -86,19 +87,8 @@ USB.
 
 ## Status
 
-**Not yet tested on a Tab5.** It builds cleanly and the protocol and renderer tests pass. The
-USB host code, M8 protocol and rendering were proven on an earlier ESP32-S3 prototype
-(see [History](#history)). Things to check first on hardware:
-
-- **Chip revision:** esptool prints it when flashing. The build targets ESP32-P4 revisions
-  before 3.0; a v3.x chip needs a different target.
-- **Orientation:** the layout should be upright. If not, use `TAB5_ROTATE_180`.
-- **M8 at high speed:** the `port:` log line should show `speed=high` once the M8 connects.
-- **Audio:** the `audio:` summary logged every 5 seconds should show about 880,000 bytes and
-  a non-zero `peak` while the M8 plays.
-- **Headphone detect:** plug and unplug headphones and watch for `HP_DET reads 0/1` in the
-  log. Then set `TAB5_HP_DET_INSERTED_LEVEL` to the value that means "inserted", and the
-  output switches automatically.
+**Working on the Tab5:** the M8 connects over high-speed USB, and its screen, keys, and audio
+through the speaker and headphones all work.
 
 ### Roadmap
 

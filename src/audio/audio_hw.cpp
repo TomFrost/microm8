@@ -129,8 +129,7 @@ int headphones_inserted() {
     }
     const int level = (in & kHpDetBit) ? 1 : 0;
     if (level != raw) {
-      // Logged so HP_DET's polarity can be confirmed: plug and unplug headphones and watch.
-      ESP_LOGI(TAG, "HP_DET reads %d", level);
+      ESP_LOGI(TAG, "headphones %s", level == TAB5_HP_DET_INSERTED_LEVEL ? "in" : "out");
       raw = level;
     }
   }

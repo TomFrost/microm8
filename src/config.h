@@ -54,10 +54,10 @@
 #define TAB5_ES8388_ADDR 0x10
 #define TAB5_IOE0_ADDR 0x43 // PI4IOE5V6408: HP_DET (bit 7, input), SPK_EN (bit 1)
 
-// HP_DET's polarity isn't documented. Until it's confirmed on hardware, jack changes are only
-// logged. Once known, set -DTAB5_HP_DET_INSERTED_LEVEL=0 or 1 to switch outputs automatically.
+// HP_DET reads 1 with headphones plugged in (confirmed on hardware). Plugging in switches to
+// headphones and unplugging back to the speaker. -1 disables automatic switching.
 #ifndef TAB5_HP_DET_INSERTED_LEVEL
-#define TAB5_HP_DET_INSERTED_LEVEL -1
+#define TAB5_HP_DET_INSERTED_LEVEL 1
 #endif
 
 // ---------------------------------------------------------------------------
