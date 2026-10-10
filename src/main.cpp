@@ -32,19 +32,26 @@ constexpr size_t kRxStreamBytes = 32 * 1024;
 constexpr uint32_t kFrameIntervalMs = 16; // cap LCD updates at ~60 Hz
 constexpr uint32_t kSettingsSaveDelayMs = 2000;
 constexpr uint32_t kJackDebounceMs = 100;
+constexpr uint32_t kPowerLogIntervalMs = 10000;
+constexpr uint32_t kPopupTimeoutMs = 4000; // the row under the status bar closes after this
 
 StreamBufferHandle_t rx_stream;
 Preferences prefs;
 
-std::atomic<uint8_t> held_keys{0};   // written by touch task, drawn by UI task
-std::atomic<bool> audio_settings_changed{false};
+// Written by the touch task, read by the UI task.
+std::atomic<uint8_t> held_keys{0};
+std::atomic<bool> settings_changed{false};
+std::atomic<ui::Popup> popup{ui::Popup::kNone};
+std::atomic<uint32_t> popup_touched_at{0};
+std::atomic<int> brightness{ui::kBrightnessMax};
 
 void send_cmd(uint8_t cmd) { m8usb::send(&cmd, 1); }
 
-void save_audio_settings() {
+void save_settings() {
   prefs.putUChar("vol_spk", (uint8_t)audio::volume_for(audio::Output::kSpeaker));
   prefs.putUChar("vol_hp", (uint8_t)audio::volume_for(audio::Output::kHeadphones));
   prefs.putUChar("output", (uint8_t)audio::output());
+  prefs.putUChar("bright", (uint8_t)brightness.load());
 }
 
 // Switches to headphones when a plug goes in and back to the speaker when it comes out.
@@ -67,7 +74,7 @@ void poll_jack_detect(uint32_t now) {
   stable = inserted;
   if (first && !inserted) return; // keep the saved choice at boot if nothing is plugged in
   audio::set_output(inserted ? audio::Output::kHeadphones : audio::Output::kSpeaker);
-  audio_settings_changed = true;
+  settings_changed = true;
 }
 
 ui::Status::Link link_for(m8usb::State s) {
@@ -105,6 +112,8 @@ void ui_task(void *) {
   uint32_t last_frame = 0;
   uint32_t second_reset_at = 0;
   uint32_t settings_dirty_since = 0;
+  uint32_t last_power_log = 0;
+  int applied_brightness = -1;
   uint32_t shown_log_version = logcap::version() - 1; // draw the log on the first frame
 
   show_disconnected(last_state);
@@ -149,10 +158,23 @@ void ui_task(void *) {
     }
 
     poll_jack_detect(now);
-    if (audio_settings_changed.exchange(false)) settings_dirty_since = now ? now : 1;
+    if (brightness != applied_brightness) {
+      applied_brightness = brightness;
+      ui::set_backlight(ui::backlight_for(applied_brightness));
+    }
+    if (popup != ui::Popup::kNone && now - popup_touched_at > kPopupTimeoutMs) {
+      popup = ui::Popup::kNone;
+    }
+#if MICROM8_POWER_DIAG
+    if (now - last_power_log >= kPowerLogIntervalMs) {
+      last_power_log = now;
+      board::log_power();
+    }
+#endif
+    if (settings_changed.exchange(false)) settings_dirty_since = now ? now : 1;
     if (settings_dirty_since && now - settings_dirty_since >= kSettingsSaveDelayMs) {
       settings_dirty_since = 0;
-      save_audio_settings();
+      save_settings();
     }
 
     if (now - last_frame >= kFrameIntervalMs) {
@@ -176,12 +198,26 @@ void ui_task(void *) {
       st.fw_minor = info.fw_minor;
       st.fw_patch = info.fw_patch;
       st.audio = m8usb::audio_streaming();
-      st.volume = audio::volume();
       st.oversized = m8screen::oversized();
-      st.headphones_available = audio::headphones_available();
+      st.volume = audio::volume();
       st.headphones = audio::output() == audio::Output::kHeadphones;
+      st.popup = popup;
+      st.power = !board::battery_present() ? ui::PowerSource::kNoBattery
+                 : board::charging()        ? ui::PowerSource::kCharging
+                 : board::external_power()  ? ui::PowerSource::kPluggedIn
+                                            : ui::PowerSource::kBattery;
       st.battery = board::battery_percent();
+      st.power_mw = MICROM8_POWER_DIAG ? board::power_draw_mw() : -1;
       ui::draw_status(st);
+
+      ui::Controls controls{};
+      controls.popup = popup;
+      controls.volume = st.volume;
+      controls.headphones = st.headphones;
+      controls.brightness = brightness;
+      controls.power = st.power;
+      controls.battery = st.battery;
+      ui::draw_controls(controls);
     }
   }
 }
@@ -199,19 +235,37 @@ void touch_task(void *) {
       mask = keypad::mask_for(points, count);
       held_keys = mask;
 
-      // Status bar buttons act on the first touch landing on them.
+      // Status bar and slider row: the first touch landing on a target wins.
+      const ui::Popup open = popup;
       ui::Hit hit = ui::Hit::kNone;
+      int value = 0;
       for (int i = 0; i < count && hit == ui::Hit::kNone; i++) {
-        hit = ui::hit_test_status(points[i].x, points[i].y);
+        hit = ui::hit_test(points[i].x, points[i].y, open, &value);
       }
-      if (hit != prev_hit && hit != ui::Hit::kNone) {
-        if (hit == ui::Hit::kOutputToggle) {
+      if (hit != ui::Hit::kNone) popup_touched_at = millis(); // keeps the row open
+
+      // Buttons act once per press; sliders follow the finger.
+      if (hit != prev_hit) {
+        if (hit == ui::Hit::kVolumeIcon) {
+          popup = open == ui::Popup::kVolume ? ui::Popup::kNone : ui::Popup::kVolume;
+        } else if (hit == ui::Hit::kBrightnessIcon) {
+          popup = open == ui::Popup::kBrightness ? ui::Popup::kNone : ui::Popup::kBrightness;
+        } else if (hit == ui::Hit::kPowerIcon) {
+          popup = open == ui::Popup::kPower ? ui::Popup::kNone : ui::Popup::kPower;
+        } else if (hit == ui::Hit::kOutputToggle) {
           audio::set_output(audio::output() == audio::Output::kSpeaker ? audio::Output::kHeadphones
                                                                        : audio::Output::kSpeaker);
-        } else {
-          audio::set_volume(audio::volume() + (hit == ui::Hit::kVolumeUp ? 1 : -1));
+          settings_changed = true;
         }
-        audio_settings_changed = true;
+      }
+      if (hit == ui::Hit::kSlider) {
+        if (open == ui::Popup::kVolume && value != audio::volume()) {
+          audio::set_volume(value);
+          settings_changed = true;
+        } else if (open == ui::Popup::kBrightness && value != brightness) {
+          brightness = value;
+          settings_changed = true;
+        }
       }
       prev_hit = hit;
     }
@@ -247,6 +301,10 @@ void setup() {
   const int speaker_volume = prefs.getUChar("vol_spk", 7);
   const int headphone_volume = prefs.getUChar("vol_hp", 4); // line level is loud; start low
   const auto output = (audio::Output)prefs.getUChar("output", (uint8_t)audio::Output::kSpeaker);
+  const int saved_brightness = prefs.getUChar("bright", ui::kBrightnessMax);
+  brightness = saved_brightness < ui::kBrightnessMin || saved_brightness > ui::kBrightnessMax
+                   ? ui::kBrightnessMax
+                   : saved_brightness;
 
   if (!m8screen::init()) ESP_LOGE(TAG, "framebuffer init failed");
   m8proto::init();

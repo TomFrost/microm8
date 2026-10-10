@@ -20,8 +20,8 @@ harness.*
 The Tab5's 5" screen is used in portrait (720×1280):
 
 - **M8 screen at 2×** (640×480) at the top, a clean integer scale of the Headless's 320×240.
-- **Status bar:** connection and firmware version, battery level, speaker/headphone toggle,
-  volume.
+- **Status bar:** connection and firmware version on the left; volume, brightness and power
+  icons on the right.
 - **The M8's own key layout** along the bottom: the cursor keys as an inverted T, SHIFT/PLAY
   directly under DOWN/RIGHT, and OPTION/EDIT up and to the right of UP, as on the hardware.
   Keys are 144 px (about 12.5 mm).
@@ -34,9 +34,17 @@ To turn the layout upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.i
   hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Each key's touch area
   reaches halfway into the gap around it, so near misses still count without neighbouring
   keys overlapping.
-- **SPK / HP:** chooses the speaker or the headphone jack. Plugging headphones in switches to
-  them automatically, and unplugging switches back. Each output keeps its own volume.
-- **Volume:** `−`/`+` (0–10). Volumes and the selected output are saved to flash.
+- **Volume icon** (a speaker, or headphones when they're the output): opens a row with the
+  SPK/HP toggle and a volume slider (0–10). Plugging headphones in switches to them
+  automatically, and unplugging switches back. Each output keeps its own volume.
+- **Brightness icon** (sun): opens a brightness slider. The lowest step is 30%, where the
+  backlight stops dimming. Dimming also cuts power: about 0.8 W between 30% and full.
+- **Power icon:** a battery filled and coloured by charge (green when full, yellow around
+  half, red when low); an empty battery with a green bolt while charging; a full battery with
+  a light bolt when plugged in and full; a plug when no battery is fitted. Tap it for the
+  details in words.
+- Rows open under the status bar without covering the M8 screen or keys, and close when you
+  tap the icon again or after 4 seconds. Volumes, output and brightness are saved to flash.
 
 ## Hardware setup
 
@@ -75,11 +83,11 @@ pio test -e native
 | `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
 | `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. Ported from m8c. |
 | `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
-| `src/display/ui.cpp` | Portrait layout through M5GFX: scales changed bands 2× to the display at up to 60 Hz, draws the keypad and status bar. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
+| `src/display/ui.cpp` | Portrait layout through M5GFX: scales changed bands 2× to the display at up to 60 Hz, draws the keypad, status bar icons and the volume/brightness/power row. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
 | `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and key hit-testing. Produces the M8 key bitmask (`'C'` + mask). |
 | `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), a silence gate so the codec goes quiet between songs, per-output volume levels, mono mix for the speaker. |
 | `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. |
-| `src/board.cpp` | M5Unified bring-up, USB-A 5 V, battery gauge, and the lock for the shared internal I2C bus. |
+| `src/board.cpp` | M5Unified bring-up, USB-A 5 V, and the lock for the shared internal I2C bus. Switches off hardware microm8 doesn't use (the ESP32-C6 wireless chip and the camera). Battery state from the INA226 current sensor: charging, plugged in, or no battery. |
 
 FreeRTOS tasks: USB and audio run on core 0; display and touch run on core 1. Serial data
 passes from USB to the UI task through a stream buffer, so a slow display update never stalls
@@ -99,6 +107,11 @@ through the speaker and headphones all work.
   a bus-powered keyboard.
 
 ## Troubleshooting
+
+**Measuring power draw:** build with `-DMICROM8_POWER_DIAG=1`. The status bar then shows the
+power drawn from the battery, the log prints a power summary every 10 seconds, and boot
+measures what switching off the C6 and camera saves (about 0.2 W). Only meaningful on
+battery.
 
 **While no M8 is connected, the M8 area shows the last 12 log lines**, so many problems can be
 diagnosed without a computer. Errors are red and warnings amber.

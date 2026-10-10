@@ -15,7 +15,7 @@
 //   |  |    640x480     |  |
 //   |  +----------------+  |   520
 //   |  status bar          |   544 .. 608
-//   |                      |
+//   |  (slider row)        |   614 .. 690, when open
 //   |          OPT  EDIT   |   708
 //   |      ^               |
 //   |  <   v   >           |
@@ -35,6 +35,12 @@
 #define STATUS_W LCD_WIDTH
 #define STATUS_H 64
 
+// Slider row for volume or brightness, shown in the gap between the status bar and the keypad
+// when its status-bar icon is tapped. Must end above the keypad's hit rects (OPTION/EDIT's
+// start at y = 696).
+#define CONTROLS_Y 614
+#define CONTROLS_H 76
+
 // Keypad (see keypad_layout.cpp): the M8's own arrangement on a regular grid, with OPTION/EDIT
 // shifted up and right, and SHIFT/PLAY down, by KEY_OFFSET. Proportions follow the M8.
 #define KEY_SIZE 144
@@ -52,7 +58,19 @@
 #define TAB5_I2S_DIN 28  // from ES7210 (mics)
 
 #define TAB5_ES8388_ADDR 0x10
-#define TAB5_IOE0_ADDR 0x43 // PI4IOE5V6408: HP_DET (bit 7, input), SPK_EN (bit 1)
+
+// PI4IOE5V6408 I/O expanders on the internal I2C bus.
+#define TAB5_IOE0_ADDR 0x43 // HP_DET (bit 7, input), CAM_RST (bit 6), SPK_EN (bit 1)
+#define TAB5_IOE0_CAM_RST (1 << 6)
+#define TAB5_IOE1_ADDR 0x44 // CHG_STAT (bit 6, input), USB5V_EN (bit 3), WLAN_PWR_EN (bit 0)
+#define TAB5_IOE1_WLAN_PWR_EN (1 << 0)
+
+// Power diagnostics: measure the battery-current saving of each power cut at boot (adds about
+// 2 s to boot), log a power summary every 10 s, and show the power draw in the status bar.
+// Only meaningful on battery.
+#ifndef MICROM8_POWER_DIAG
+#define MICROM8_POWER_DIAG 0
+#endif
 
 // HP_DET reads 1 with headphones plugged in (confirmed on hardware). Plugging in switches to
 // headphones and unplugging back to the speaker. -1 disables automatic switching.

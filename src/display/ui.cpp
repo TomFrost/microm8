@@ -1,10 +1,12 @@
-// Tab5 display: 720x1280 portrait through M5GFX. The M8's 320x240 screen is drawn at 2x,
-// the M8 key layout sits along the bottom, and a status bar sits between them.
+// Tab5 display: 720x1280 portrait through M5GFX. The M8's 320x240 screen is drawn at 2x, the
+// M8 key layout sits along the bottom, and a status bar sits between them. Tapping the volume
+// or brightness icon in the status bar opens a slider row under it.
 #include "display/ui.h"
 
 #include <M5Unified.h>
 #include <atomic>
 #include <esp_heap_caps.h>
+#include <math.h>
 #include <esp_log.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,14 +38,24 @@ const uint16_t kErr = rgb(220, 60, 60);
 
 constexpr int kKeyRadius = 14;
 
-// Status bar controls, relative to STATUS_X.
-constexpr int kOutputX = 416;
-constexpr int kOutputW = 96;
-constexpr int kVolDownX = 528;
-constexpr int kVolBtnW = 60;
-constexpr int kVolTextX = 592;
-constexpr int kVolTextW = 52;
-constexpr int kVolUpX = 648;
+// Status bar icons (centres and touch zones, relative to STATUS_X), right-aligned.
+constexpr int kVolumeIconX = 520;
+constexpr int kBrightnessIconX = 592;
+constexpr int kIconHalfZone = 36; // touch zone extends this far either side of an icon
+constexpr int kPowerIconX = 670;  // battery or plug icon, centre
+constexpr int kBatteryX = kPowerIconX - 26; // battery body; the terminal nub follows
+constexpr int kBatteryW = 48;
+constexpr int kBatteryH = 24;
+constexpr int kPowerReadoutRight = 476; // diagnostics only
+
+// Slider row (CONTROLS_Y..+CONTROLS_H).
+constexpr int kToggleX = 24; // SPK/HP button (volume row)
+constexpr int kToggleW = 104;
+constexpr int kSliderX0 = 168;
+constexpr int kSliderX1 = 628;
+constexpr int kSliderValueX = 672;
+constexpr int kSliderSlop = 30; // touch zone beyond the track ends
+constexpr int kKnobR = 16;
 
 constexpr int kScaledW = M8_SCREEN_W * M8_SCALE;
 uint16_t *scaled; // one band, scaled: kScaledW x (kBandRows * M8_SCALE)
@@ -51,7 +63,8 @@ uint16_t *scaled; // one band, scaled: kScaledW x (kBandRows * M8_SCALE)
 uint8_t drawn_mask;
 Status drawn_status;
 bool status_drawn;
-std::atomic<bool> output_toggle_shown{false}; // read by the touch task
+Controls drawn_controls;
+bool controls_drawn;
 
 M5GFX &gfx() { return M5.Display; }
 
@@ -107,12 +120,165 @@ void draw_button(int x, int y, int w, int h, const char *label, bool lit = false
   d.drawString(label, x + w / 2, y + h / 2);
 }
 
+// ---------------------------------------------------------------------------
+// Status bar icons
+// ---------------------------------------------------------------------------
+
+void draw_speaker_icon(int cx, int cy, uint16_t color, bool muted) {
+  auto &d = gfx();
+  d.fillRect(cx - 18, cy - 6, 7, 12, color);
+  d.fillTriangle(cx - 12, cy, cx - 2, cy - 13, cx - 2, cy + 13, color);
+  d.fillRect(cx - 12, cy - 6, 6, 12, color);
+  if (muted) {
+    d.drawWideLine(cx + 5, cy - 7, cx + 17, cy + 7, 1.5f, color);
+    d.drawWideLine(cx + 5, cy + 7, cx + 17, cy - 7, 1.5f, color);
+  } else {
+    d.fillArc(cx - 2, cy, 7, 9, -45, 45, color);
+    d.fillArc(cx - 2, cy, 13, 15, -45, 45, color);
+  }
+}
+
+void draw_headphones_icon(int cx, int cy, uint16_t color, bool muted) {
+  auto &d = gfx();
+  d.fillArc(cx, cy + 3, 13, 16, 180, 360, color);
+  d.fillRoundRect(cx - 17, cy + 1, 8, 13, 3, color);
+  d.fillRoundRect(cx + 9, cy + 1, 8, 13, 3, color);
+  if (muted) d.drawWideLine(cx - 18, cy + 15, cx + 18, cy - 15, 1.5f, kErr);
+}
+
+void draw_sun_icon(int cx, int cy, uint16_t color) {
+  auto &d = gfx();
+  d.fillCircle(cx, cy, 7, color);
+  for (int i = 0; i < 8; i++) {
+    const float a = i * (float)M_PI / 4;
+    d.drawWideLine(cx + cosf(a) * 11, cy + sinf(a) * 11, cx + cosf(a) * 16, cy + sinf(a) * 16,
+                   1.3f, color);
+  }
+}
+
+// Colour for a battery level: red when nearly empty, through yellow at 50%, to green at 100%.
+uint16_t battery_color(int percent) {
+  struct Rgb {
+    float r, g, b;
+  };
+  const Rgb red = {220, 60, 60}, yellow = {230, 200, 40}, green = {60, 200, 90};
+  const float t = percent <= 10 ? 0.0f : (percent >= 100 ? 1.0f : (percent - 10) / 90.0f);
+  Rgb a = red, b = yellow;
+  float u = t / 0.444f; // 10% -> 50% is the first 44% of the range
+  if (t > 0.444f) {
+    a = yellow;
+    b = green;
+    u = (t - 0.444f) / 0.556f;
+  }
+  return rgb((uint8_t)(a.r + (b.r - a.r) * u), (uint8_t)(a.g + (b.g - a.g) * u),
+             (uint8_t)(a.b + (b.b - a.b) * u));
+}
+
+// Icon background: lit while its row is open.
+void draw_icon_zone(int cx, bool lit) {
+  gfx().fillRoundRect(STATUS_X + cx - kIconHalfZone + 4, STATUS_Y + 6, 2 * kIconHalfZone - 8,
+                      STATUS_H - 12, 10, lit ? kKeyFill : kBg);
+}
+
+// Lightning bolt, about 16 x 26, centred on (cx, cy).
+void draw_bolt(int cx, int cy, uint16_t color) {
+  auto &d = gfx();
+  const int x = cx - 8, y = cy - 13;
+  d.fillTriangle(x + 11, y, x + 1, y + 15, x + 9, y + 15, color);
+  d.fillTriangle(x + 7, y + 11, x + 15, y + 11, x + 5, y + 26, color);
+}
+
+// Bolt with a 2 px border in `edge`, so it reads over the battery fill and the background.
+void draw_outlined_bolt(int cx, int cy, uint16_t color, uint16_t edge) {
+  for (int dx = -2; dx <= 2; dx += 2) {
+    for (int dy = -2; dy <= 2; dy += 2) draw_bolt(cx + dx, cy + dy, edge);
+  }
+  draw_bolt(cx, cy, color);
+}
+
+// Mains plug, centred on (cx, cy): shown when there's no battery.
+void draw_plug_icon(int cx, int cy, uint16_t color) {
+  auto &d = gfx();
+  d.fillRect(cx - 7, cy - 14, 4, 8, color); // prongs
+  d.fillRect(cx + 3, cy - 14, 4, 8, color);
+  d.fillRoundRect(cx - 11, cy - 7, 22, 14, 4, color); // body
+  d.fillRect(cx - 2, cy + 7, 4, 7, color); // cord
+}
+
+// Power icon: a battery filled to its charge level and coloured by it; while charging, an
+// empty battery with a green bolt (the voltage-based gauge reads high then); plugged in and
+// full, a full green battery with a light, outlined bolt; with no battery, a plug.
+void draw_power_icon(const Status &s) {
+  auto &d = gfx();
+  const int cx = STATUS_X + kPowerIconX;
+  const int cy = STATUS_Y + STATUS_H / 2;
+  draw_icon_zone(kPowerIconX, s.popup == Popup::kPower);
+
+  if (s.power == PowerSource::kNoBattery) {
+    draw_plug_icon(cx, cy, kKeyLabel);
+    return;
+  }
+
+  const int x = STATUS_X + kBatteryX;
+  const int y = cy - kBatteryH / 2;
+  d.drawRoundRect(x, y, kBatteryW, kBatteryH, 5, kStatusText);
+  d.drawRoundRect(x + 1, y + 1, kBatteryW - 2, kBatteryH - 2, 4, kStatusText);
+  d.fillRoundRect(x + kBatteryW + 1, y + kBatteryH / 2 - 5, 4, 10, 1, kStatusText);
+
+  if (s.power == PowerSource::kCharging) {
+    draw_bolt(x + kBatteryW / 2, cy, kOk);
+    return;
+  }
+  if (s.power == PowerSource::kPluggedIn) {
+    d.fillRoundRect(x + 4, y + 4, kBatteryW - 8, kBatteryH - 8, 2, kOk);
+    draw_outlined_bolt(x + kBatteryW / 2, cy, kKeyFillDown, kBg);
+    return;
+  }
+  if (s.battery < 0) return;
+  const int pct = s.battery > 100 ? 100 : s.battery;
+  int fill_w = (kBatteryW - 8) * pct / 100;
+  if (pct > 0 && fill_w < 3) fill_w = 3; // keep a visible sliver
+  if (fill_w > 0) d.fillRoundRect(x + 4, y + 4, fill_w, kBatteryH - 8, 2, battery_color(pct));
+}
+
 bool same(const Status &a, const Status &b) {
   return a.link == b.link && a.device == b.device && a.fw_major == b.fw_major &&
          a.fw_minor == b.fw_minor && a.fw_patch == b.fw_patch && a.audio == b.audio &&
-         a.volume == b.volume && a.oversized == b.oversized &&
-         a.headphones_available == b.headphones_available && a.headphones == b.headphones &&
-         a.battery == b.battery;
+         a.oversized == b.oversized && a.volume == b.volume && a.headphones == b.headphones &&
+         a.popup == b.popup && a.power == b.power && a.battery == b.battery &&
+         a.power_mw == b.power_mw;
+}
+
+// ---------------------------------------------------------------------------
+// Slider row
+// ---------------------------------------------------------------------------
+
+struct SliderRange {
+  int min, max;
+};
+
+SliderRange slider_range(Popup popup) {
+  return popup == Popup::kBrightness ? SliderRange{kBrightnessMin, kBrightnessMax}
+                                     : SliderRange{0, 10};
+}
+
+int slider_pos(int value, SliderRange r) {
+  return kSliderX0 + (value - r.min) * (kSliderX1 - kSliderX0) / (r.max - r.min);
+}
+
+void draw_slider(int value, SliderRange r, int cy) {
+  auto &d = gfx();
+  const int pos = slider_pos(value, r);
+  d.fillRoundRect(kSliderX0, cy - 5, kSliderX1 - kSliderX0, 10, 5, kKeyEdge);
+  if (pos > kSliderX0) d.fillRoundRect(kSliderX0, cy - 5, pos - kSliderX0, 10, 5, kKeyLabel);
+  d.fillCircle(pos, cy, kKnobR, kKeyFillDown);
+
+  char text[8];
+  snprintf(text, sizeof(text), "%d", value);
+  d.setFont(&fonts::FreeSansBold12pt7b);
+  d.setTextDatum(textdatum_t::middle_center);
+  d.setTextColor(kKeyLabel);
+  d.drawString(text, kSliderValueX, cy);
 }
 
 } // namespace
@@ -196,11 +362,11 @@ void draw_keys(uint8_t pressed_mask, bool force) {
 }
 
 void draw_status(const Status &s) {
+  auto &d = gfx();
   if (status_drawn && same(s, drawn_status)) return;
   drawn_status = s;
   status_drawn = true;
 
-  auto &d = gfx();
   d.startWrite();
   d.fillRect(STATUS_X, STATUS_Y, STATUS_W, STATUS_H, kBg);
 
@@ -242,37 +408,99 @@ void draw_status(const Status &s) {
     x += 14;
     x += d.drawString("no audio", x, cy);
   }
-  if (s.battery >= 0) {
-    snprintf(text, sizeof(text), "%d%%", s.battery);
-    d.setTextColor(s.battery <= 15 ? kErr : kStatusText);
+
+  if (s.power_mw >= 0) {
+    snprintf(text, sizeof(text), "%d.%02d W", s.power_mw / 1000, (s.power_mw % 1000) / 10);
+    d.setTextColor(kWarn);
     d.setTextDatum(textdatum_t::middle_right);
-    d.drawString(text, STATUS_X + kOutputX - 16, cy);
+    d.drawString(text, STATUS_X + kPowerReadoutRight, cy);
   }
 
-  const int by = STATUS_Y + 6;
-  const int bh = STATUS_H - 12;
-  output_toggle_shown = s.headphones_available;
-  if (s.headphones_available) {
-    draw_button(STATUS_X + kOutputX, by, kOutputW, bh, s.headphones ? "HP" : "SPK", s.headphones);
+  draw_icon_zone(kVolumeIconX, s.popup == Popup::kVolume);
+  if (s.headphones) {
+    draw_headphones_icon(STATUS_X + kVolumeIconX, cy, kKeyLabel, s.volume == 0);
+  } else {
+    draw_speaker_icon(STATUS_X + kVolumeIconX, cy, kKeyLabel, s.volume == 0);
   }
-  draw_button(STATUS_X + kVolDownX, by, kVolBtnW, bh, "-");
-  draw_button(STATUS_X + kVolUpX, by, kVolBtnW, bh, "+");
-  snprintf(text, sizeof(text), "%d", s.volume);
-  d.setFont(&fonts::FreeSansBold12pt7b);
-  d.setTextDatum(textdatum_t::middle_center);
-  d.setTextColor(kKeyLabel);
-  d.drawString(text, STATUS_X + kVolTextX + kVolTextW / 2, cy);
+  draw_icon_zone(kBrightnessIconX, s.popup == Popup::kBrightness);
+  draw_sun_icon(STATUS_X + kBrightnessIconX, cy, kKeyLabel);
+  draw_power_icon(s);
   d.endWrite();
 }
 
-Hit hit_test_status(int x, int y) {
-  if (y < STATUS_Y || y >= STATUS_Y + STATUS_H) return Hit::kNone;
-  const int rx = x - STATUS_X;
-  if (output_toggle_shown && rx >= kOutputX - 4 && rx < kOutputX + kOutputW + 4) {
+void draw_controls(const Controls &c) {
+  if (controls_drawn && c.popup == drawn_controls.popup && c.volume == drawn_controls.volume &&
+      c.headphones == drawn_controls.headphones && c.brightness == drawn_controls.brightness &&
+      c.power == drawn_controls.power && c.battery == drawn_controls.battery) {
+    return;
+  }
+  drawn_controls = c;
+  controls_drawn = true;
+
+  auto &d = gfx();
+  d.startWrite();
+  d.fillRect(0, CONTROLS_Y, LCD_WIDTH, CONTROLS_H, kBg);
+  const int cy = CONTROLS_Y + CONTROLS_H / 2;
+  if (c.popup == Popup::kVolume) {
+    draw_button(kToggleX, cy - 26, kToggleW, 52, c.headphones ? "HP" : "SPK", c.headphones);
+    draw_slider(c.volume, slider_range(c.popup), cy);
+  } else if (c.popup == Popup::kBrightness) {
+    draw_sun_icon(kToggleX + kToggleW / 2, cy, kKeyLabel);
+    draw_slider(c.brightness, slider_range(c.popup), cy);
+  } else if (c.popup == Popup::kPower) {
+    char text[32];
+    if (c.power == PowerSource::kNoBattery) {
+      snprintf(text, sizeof(text), "No battery");
+    } else if (c.power == PowerSource::kCharging) {
+      snprintf(text, sizeof(text), "Battery charging");
+    } else if (c.power == PowerSource::kPluggedIn) {
+      snprintf(text, sizeof(text), "Plugged in, battery full");
+    } else if (c.battery >= 0) {
+      snprintf(text, sizeof(text), "Battery %d%%", c.battery);
+    } else {
+      snprintf(text, sizeof(text), "Battery level unknown");
+    }
+    d.setFont(&fonts::FreeSansBold12pt7b);
+    d.setTextDatum(textdatum_t::middle_right);
+    d.setTextColor(kKeyLabel);
+    d.drawString(text, STATUS_X + kPowerIconX + 24, cy);
+  }
+  d.endWrite();
+}
+
+uint8_t backlight_for(int brightness) {
+  // The backlight driver stops dimming below about 30% duty (measured), so the slider spans
+  // 30%..100% linearly.
+  constexpr int kMinDuty = 255 * 30 / 100;
+  if (brightness < kBrightnessMin) brightness = kBrightnessMin;
+  if (brightness > kBrightnessMax) brightness = kBrightnessMax;
+  return (uint8_t)(kMinDuty + (255 - kMinDuty) * (brightness - kBrightnessMin) /
+                                  (kBrightnessMax - kBrightnessMin));
+}
+
+Hit hit_test(int x, int y, Popup open, int *value) {
+  if (y >= STATUS_Y && y < STATUS_Y + STATUS_H) {
+    const int rx = x - STATUS_X;
+    if (abs(rx - kVolumeIconX) < kIconHalfZone) return Hit::kVolumeIcon;
+    if (abs(rx - kBrightnessIconX) < kIconHalfZone) return Hit::kBrightnessIcon;
+    if (abs(rx - kPowerIconX) < kIconHalfZone) return Hit::kPowerIcon;
+    return Hit::kNone;
+  }
+  if (open == Popup::kNone || open == Popup::kPower) return Hit::kNone; // nothing to touch
+  if (y < CONTROLS_Y || y >= CONTROLS_Y + CONTROLS_H) return Hit::kNone;
+
+  if (open == Popup::kVolume && x >= kToggleX - 8 && x < kToggleX + kToggleW + 8) {
     return Hit::kOutputToggle;
   }
-  if (rx >= kVolDownX - 4 && rx < kVolTextX) return Hit::kVolumeDown;
-  if (rx >= kVolUpX - 4 && rx < STATUS_W) return Hit::kVolumeUp;
+  if (x >= kSliderX0 - kSliderSlop && x < kSliderX1 + kSliderSlop) {
+    const SliderRange r = slider_range(open);
+    const int span = kSliderX1 - kSliderX0;
+    int v = r.min + ((x - kSliderX0) * (r.max - r.min) + span / 2) / span;
+    if (v < r.min) v = r.min;
+    if (v > r.max) v = r.max;
+    *value = v;
+    return Hit::kSlider;
+  }
   return Hit::kNone;
 }
 
