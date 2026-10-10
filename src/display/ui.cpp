@@ -106,8 +106,9 @@ const Layout kPortrait = {
     {0, 0, 0, 0},
 };
 
-// Landscape: icons down the left margin (battery first), the panel under them, and SHIFT in
-// the corner (keypad_layout.cpp). The key layout icon heads the right margin, over the keys.
+// Landscape: volume, brightness and rotation icons down the left margin, the panel under them,
+// and SHIFT in the corner (keypad_layout.cpp). The power and key layout icons head the right
+// margin, over the keys.
 const Layout kLandscape = {
     true,
     LCD_HEIGHT,
@@ -117,9 +118,9 @@ const Layout kLandscape = {
     false,
     0,
     0,
-    {LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2,
+    {LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X + LAND_M8_W + LAND_M8_X / 2,
      LAND_M8_X + LAND_M8_W + LAND_M8_X / 2},
-    {104, 168, 232, 40, 40},
+    {40, 104, 168, 40, 104},
     {0, LAND_ROW_Y, LAND_M8_X, LAND_ROW_H},
     true,
     LAND_M8_X - 10,
@@ -705,15 +706,6 @@ void draw_key(Gfx &d, const keypad::Key &k, bool down) {
   d.drawString(k.label, cx, cy);
 }
 
-void draw_button(Gfx &d, int x, int y, int w, int h, const char *label, bool lit = false) {
-  d.fillRoundRect(x, y, w, h, 8, lit ? kKeyFillDown : kKeyFill);
-  d.drawRoundRect(x, y, w, h, 8, lit ? kKeyFillDown : kKeyEdge);
-  d.setFont(&fonts::FreeSansBold12pt7b);
-  d.setTextDatum(textdatum_t::middle_center);
-  d.setTextColor(lit ? kKeyLabelDown : kKeyLabel);
-  d.drawString(label, x + w / 2, y + h / 2);
-}
-
 void draw_speaker_icon(Gfx &d, int cx, int cy, uint16_t color, bool muted) {
   d.fillRect(cx - 18, cy - 6, 7, 12, color);
   d.fillTriangle(cx - 12, cy, cx - 2, cy - 13, cx - 2, cy + 13, color);
@@ -874,11 +866,11 @@ int draw_wrapped(Gfx &d, const char *text, int x, int y, int wrap, int line_h) {
 // swipe hint.
 // ---------------------------------------------------------------------------
 
-constexpr int kToggleInset = 24; // SPK/HP button (volume row) / sun (brightness row)
-constexpr int kToggleW = 104;
+constexpr int kToggleInset = 24; // speaker/headphones selector (volume row) / sun (brightness row)
+constexpr int kToggleW = 128;
 constexpr int kToggleH = 52;
 constexpr int kVToggleH = 44;
-constexpr int kSliderInsetL = 168; // horizontal slider ends, from the row's ends
+constexpr int kSliderInsetL = 184; // horizontal slider ends, from the row's ends
 constexpr int kSliderInsetR = 92;
 constexpr int kVSliderTop = 92; // vertical slider ends, from the panel's top and bottom
 constexpr int kVSliderBottom = 20;
@@ -910,7 +902,7 @@ Track track(const Layout &l) {
           l.row.y + l.row.h / 2};
 }
 
-// The SPK/HP button, or where the sun sits in the brightness row.
+// The speaker/headphones selector, or where the sun sits in the brightness row.
 Rect toggle_rect(const Layout &l) {
   if (l.vertical) return {l.row.x + (l.row.w - kToggleW) / 2, l.row.y + 6, kToggleW, kVToggleH};
   return {l.row.x + kToggleInset, l.row.y + (l.row.h - kToggleH) / 2, kToggleW, kToggleH};
@@ -1035,11 +1027,22 @@ void draw_layout_icon(Gfx &d, int cx, int cy, uint16_t color) {
   d.fillCircle(cx + 10, cy + 5, 2, color);
 }
 
+// Output selector: a speaker and headphones side by side, the selected one lit.
+void draw_output_selector(Gfx &d, const Rect &r, bool headphones) {
+  const int half = r.w / 2, cy = r.y + r.h / 2;
+  d.fillRoundRect(r.x, r.y, r.w, r.h, 8, kKeyFill);
+  d.fillRoundRect(headphones ? r.x + half : r.x, r.y, half, r.h, 8, kKeyFillDown);
+  d.drawRoundRect(r.x, r.y, r.w, r.h, 8, kKeyEdge);
+  draw_speaker_icon(d, r.x + half / 2 + 2, cy, headphones ? kKeyLabel : kKeyLabelDown, false);
+  draw_headphones_icon(d, r.x + half + half / 2, cy, headphones ? kKeyLabelDown : kKeyLabel,
+                       false);
+}
+
 void paint_row(Gfx &d, const Layout &l, const Controls &c) {
   d.fillRect(l.row.x, l.row.y, l.row.w, l.row.h, kBg);
   const Rect tg = toggle_rect(l);
   if (c.popup == Popup::kVolume) {
-    draw_button(d, tg.x, tg.y, tg.w, tg.h, c.headphones ? "HP" : "SPK", c.headphones);
+    draw_output_selector(d, tg, c.headphones);
     draw_slider(d, track(l), c.volume, slider_range(c.popup));
   } else if (c.popup == Popup::kBrightness) {
     draw_sun_icon(d, tg.x + tg.w / 2, tg.y + tg.h / 2, kKeyLabel);
@@ -1140,7 +1143,25 @@ void set_orientation(Orientation orientation) {
 void set_compact_keys(bool on) {
   if (on == compact) return;
   compact = on;
-  apply_layout(cur_orientation);
+  // Only the keys change: clear the old ones' areas and draw the new ones, leaving the rest
+  // of the screen (the M8 above all) alone.
+  const Layout &l = L();
+  auto &d = display();
+  const keypad::Table &old = keypad::table();
+  d.startWrite();
+  for (int i = 0; i < old.count; i++) {
+    const Rect b = press_box(l, old.keys[i]);
+    d.fillRect(b.x, b.y, b.w, b.h, kBg);
+  }
+  for (int i = 0; i < old.pad_count; i++) {
+    const keypad::Pad &p = old.pads[i];
+    if (!p.in_panel) d.fillRect(p.cx - p.half, p.cy - p.half, 2 * p.half, 2 * p.half, kBg);
+  }
+  d.endWrite();
+  keypad::set_arrangement(l.landscape ? keypad::Arrangement::kLandscape
+                                      : keypad::Arrangement::kPortrait,
+                          compact);
+  draw_keys(drawn_mask, true);
 }
 
 Orientation orientation() { return cur_orientation; }
@@ -1355,6 +1376,7 @@ Hit hit_test(int x, int y, Popup open, int *value) {
   const Rect toggle_zone = {tg.x - 8, tg.y - 8, tg.w + 16, tg.h + 16};
   if (open == Popup::kVolume && (l.vertical ? toggle_zone.contains(x, y)
                                             : x >= toggle_zone.x && x < toggle_zone.x + toggle_zone.w)) {
+    *value = x < tg.x + tg.w / 2 ? 0 : 1; // the speaker or headphones half
     return Hit::kOutputToggle;
   }
   const Track t = track(l);

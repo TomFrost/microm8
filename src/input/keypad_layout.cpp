@@ -108,13 +108,14 @@ static_assert(LAND_ROW_Y + LAND_ROW_H <= kLRowY3 - LKEY_GAP / 2, "landscape pane
 // Hit rects reach a little into the M8 screen, which has no other touch function on the right,
 // and only on the left beside SHIFT (the rest of the left half is for swipes).
 constexpr int kLReach = 16;
-constexpr int kLReachUp = 40; // above EDIT, which nothing else needs
+constexpr int kLIconsBottom = 138; // the power and key layout icons above the right column
+static_assert(kLRowY0 - LKEY_GAP / 2 >= kLIconsBottom, "landscape keys overlap the icons");
 
 constexpr Key make_landscape_key(const char *label, uint8_t bit, int vx, int vy) {
   const int slop = LKEY_GAP / 2;
   int x0 = vx == kLLeftX ? 0 : LAND_M8_X + LAND_M8_W - kLReach;
   int x1 = vx == kLLeftX ? LAND_M8_X + kLReach : kLandW;
-  int y0 = vy == kLRowY0 ? vy - kLReachUp : vy - slop;
+  int y0 = vy - slop;
   int y1 = vy == kLRowY3 ? kLandH : vy + LKEY_SIZE + slop;
   return Key{label,
              bit,
@@ -139,11 +140,11 @@ const Key kLandscapeKeys[] = {
 
 // Landscape pads, centred on the left panel's height. The arrows sit in the panel (which
 // shows sliders and messages in their place); the triangle mirrors them in the right margin,
-// its touch area reaching from below the layout icon down to SHIFT.
+// its touch area reaching from below the icons down to SHIFT.
 constexpr int kLPadY = LAND_ROW_Y + LAND_ROW_H / 2;
 constexpr int kLPadHalf = LAND_M8_X / 2;
 constexpr int kLRightPadX = LAND_M8_X + LAND_M8_W - kLReach;
-constexpr int kLRightPadTop = 80; // below the layout icon
+constexpr int kLRightPadTop = kLIconsBottom;
 constexpr int kLRightPadBottom = kLRowY3 - LKEY_GAP / 2;
 
 const Pad kLandscapeArrows = {PadKind::kArrows, kLPadHalf, kLPadY, kLPadHalf, 50, 15,

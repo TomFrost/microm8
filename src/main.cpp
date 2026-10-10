@@ -110,8 +110,9 @@ bool poll_orientation(uint32_t now) {
   return true;
 }
 
-// Switches to headphones when a plug goes in and back to the speaker when it comes out.
-// Only edges count, so the on-screen toggle still works with a plug inserted.
+// Switches to headphones when a plug goes in and back to the speaker when it comes out, and
+// at boot picks whichever matches the jack. After that only edges count, so the on-screen
+// selector still works with a plug inserted.
 void poll_jack_detect(uint32_t now) {
   static int stable = -1;
   static int pending = -1;
@@ -126,10 +127,10 @@ void poll_jack_detect(uint32_t now) {
   }
   if (inserted == stable || now - pending_since < kJackDebounceMs) return;
 
-  const bool first = stable < 0;
   stable = inserted;
-  if (first && !inserted) return; // keep the saved choice at boot if nothing is plugged in
-  audio::set_output(inserted ? audio::Output::kHeadphones : audio::Output::kSpeaker);
+  const auto output = inserted ? audio::Output::kHeadphones : audio::Output::kSpeaker;
+  if (output == audio::output()) return;
+  audio::set_output(output);
   settings_changed = true;
 }
 
@@ -386,11 +387,14 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
     message_at = now ? now : 1;
     settings_changed = true;
     break;
-  case ui::Hit::kOutputToggle:
-    audio::set_output(audio::output() == audio::Output::kSpeaker ? audio::Output::kHeadphones
-                                                                 : audio::Output::kSpeaker);
-    settings_changed = true;
+  case ui::Hit::kOutputToggle: {
+    const auto chosen = value ? audio::Output::kHeadphones : audio::Output::kSpeaker;
+    if (chosen != audio::output()) {
+      audio::set_output(chosen);
+      settings_changed = true;
+    }
     break;
+  }
   case ui::Hit::kSlider:
     f.role = Role::kSlider;
     set_slider(open, value);

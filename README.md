@@ -31,10 +31,11 @@ M8 pixels it covers, so text stays sharp at non-integer scales.
 **Landscape** (1280×720):
 
 - **M8 screen at 3×** (960×720), centred.
-- **Left margin:** the power, volume, brightness and rotation icons; under them a panel with
-  the arrow pad (or an open slider, the power details or a message); SHIFT in the bottom-left
+- **Left margin:** the volume, brightness and rotation icons; under them a panel with the
+  arrow pad (or an open slider, the power details or a message); SHIFT in the bottom-left
   corner.
-- **Right margin:** EDIT, OPTION, PLAY and SHIFT, stacked up from the bottom-right corner.
+- **Right margin:** the power and key layout icons; under them EDIT, OPTION, PLAY and SHIFT,
+  stacked up from the bottom-right corner.
 - No connection text, to keep the margins clear.
 
 **Compact keys** (the key layout icon toggles them, in either orientation): a pad for each
@@ -62,9 +63,10 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
     wedges.
   - **Swipes:** swipe right, left, up or down anywhere on the left half of the screen (the M8
     screen included). Keep the finger down to hold the arrow; lifting it releases.
-- **Volume icon** (a speaker, or headphones when they're the output): opens a row with the
-  SPK/HP toggle and a volume slider (0–10). Plugging headphones in switches to them
-  automatically, and unplugging switches back. Each output keeps its own volume.
+- **Volume icon** (a speaker, or headphones when they're the output): opens a row with an
+  output selector (speaker and headphones, the selected one lit) and a volume slider (0–10).
+  Plugging headphones in switches to them automatically, and unplugging switches back; at
+  power-on the output follows the jack. Each output keeps its own volume.
 - **Brightness icon** (sun): opens a brightness slider. The lowest step is 30%, where the
   backlight stops dimming. Dimming also cuts power: about 0.8 W between 30% and full.
 - **Rotation icon:** locks or unlocks rotation (crossed out in red when locked).

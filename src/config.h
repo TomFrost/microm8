@@ -45,7 +45,7 @@
 
 // Landscape keys, in the margins either side of the M8 screen: a column of EDIT, OPTION, PLAY
 // and SHIFT up from the bottom-right corner, and SHIFT in the bottom-left corner.
-#define LKEY_SIZE 136
+#define LKEY_SIZE 132 // the right column then starts below the power and key layout icons
 #define LKEY_GAP 12
 #define LKEY_MARGIN 12
 

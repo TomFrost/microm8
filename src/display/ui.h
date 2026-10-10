@@ -87,7 +87,7 @@ void show_log(const logcap::Line *lines, int count);
 
 // Touch targets in the status bar and slider row. For kSlider, `value` receives the slider
 // level under the touch (volume 0..10 or brightness kBrightnessMin..kBrightnessMax, depending
-// on which row is open).
+// on which row is open); for kOutputToggle, 0 for the speaker half, 1 for headphones.
 enum class Hit : uint8_t {
   kNone,
   kVolumeIcon,
