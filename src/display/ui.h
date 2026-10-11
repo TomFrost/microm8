@@ -76,6 +76,11 @@ void flush_m8();
 // Logs M8 drawing performance since the last call.
 void log_display_stats();
 
+// Copies the panel's framebuffer into `dst` (width * height RGB565 pixels, in the panel's
+// native portrait orientation). `rotation` receives how the UI is turned on the panel: quarter
+// turns, as M5GFX counts them. UI task only.
+bool snapshot(uint16_t *dst, int *width, int *height, int *rotation);
+
 // Redraws keys whose pressed state changed (or all, if `force`).
 void draw_keys(uint8_t pressed_mask, bool force = false);
 

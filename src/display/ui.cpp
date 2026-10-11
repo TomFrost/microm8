@@ -19,6 +19,7 @@
 #include <M5Unified.h>
 #include <atomic>
 #include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
+#include <esp_cache.h>
 #include <esp_heap_caps.h>
 #include <esp_lcd_mipi_dsi.h>
 #include <esp_lcd_panel_ops.h>
@@ -234,6 +235,7 @@ struct DsiAccess : lgfx::Panel_DSI {
 
 struct Native {
   esp_lcd_panel_handle_t panel;
+  uint16_t *fb;    // the framebuffer the panel scans (RGB565), for screenshots
   int w, h;        // panel size
   int rot;         // M5GFX's internal rotation: how UI coordinates map to the panel's
   int blank_lines; // lines from the end-of-frame event to the first visible line
@@ -286,6 +288,7 @@ bool init_native() {
   auto *dsi = static_cast<lgfx::Panel_DSI *>(panel);
   const auto &det = dsi->config_detail();
   nat.panel = DsiAccess::handle(dsi);
+  nat.fb = (uint16_t *)det.buffer;
   nat.w = panel->config().panel_width;
   nat.h = panel->config().panel_height;
   nat.blank_lines = det.vsync_front_porch + det.vsync_pulse_width + det.vsync_back_porch;
@@ -1278,6 +1281,20 @@ void flush_m8() {
     }
   }
   write_runs(runs, count);
+}
+
+bool snapshot(uint16_t *dst, int *width, int *height, int *rotation) {
+  if (!nat.fb) return false;
+  const size_t bytes = (size_t)nat.w * nat.h * sizeof(uint16_t);
+  // The M8 area is written by DMA, so the cache may hold stale lines: write back anything the
+  // CPU has drawn (M5GFX normally already has), then drop the cached copy and read memory.
+  esp_cache_msync(nat.fb, bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+  esp_cache_msync(nat.fb, bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+  memcpy(dst, nat.fb, bytes);
+  *width = nat.w;
+  *height = nat.h;
+  *rotation = nat.rot;
+  return true;
 }
 
 void log_display_stats() {

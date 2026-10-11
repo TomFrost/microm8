@@ -19,6 +19,7 @@
 #include "board.h"
 #include "config.h"
 #include "diag/log_capture.h"
+#include "diag/screenshot.h"
 #include "display/ui.h"
 #include "input/keypad.h"
 #include "input/touch.h"
@@ -339,6 +340,7 @@ void ui_task(void *) {
 
       ui::flush_m8();
       ui::draw_status(st);
+      if (screenshot::requested()) screenshot::capture(); // a complete frame
     }
   }
 }
@@ -586,6 +588,7 @@ void audio_sink(const uint8_t *pcm, size_t bytes) { audio::push(pcm, bytes); }
 void setup() {
   logcap::begin();
   Serial.begin(115200);
+  screenshot::begin();
   ESP_LOGI(TAG, "microm8 starting");
   if (!board::begin()) ESP_LOGE(TAG, "board init failed");
   ESP_LOGI(TAG, "board: %s", board::name());

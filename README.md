@@ -11,6 +11,14 @@ landscape, with a bigger M8 screen and keys at the sides.
 The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimplemented for the
 ESP32.
 
+<p>
+<img src="docs/screenshot-landscape.png" width="560" alt="Landscape: the M8's song view at 3x in the middle, status icons and an arrow pad on the left, a key layout icon and the OPTION, EDIT and PLAY triangle on the right, SHIFT in both bottom corners">
+<img src="docs/screenshot-portrait.png" width="177" alt="Portrait: the M8's song view across the top, the status bar under it, and the compact keys: an arrow pad and the OPTION, EDIT and PLAY triangle, with SHIFT in both bottom corners">
+</p>
+
+*Landscape and portrait, with compact keys. Screenshots from the device (see
+[Screenshots](#screenshots)).*
+
 ## Layout
 
 The screen follows the Tab5's accelerometer through all four orientations. The rotation icon
@@ -127,6 +135,17 @@ The M8 protocol parser and framebuffer renderer have host-side unit tests:
 
 ```bash
 pio test -e native
+```
+
+### Screenshots
+
+`tools/screenshot.py` saves exactly what's on the screen as a PNG, over the USB-C serial port
+(it sends `S`; the firmware replies with its framebuffer, see `src/diag/screenshot.cpp`). It
+needs only Python 3, on macOS or Linux. Close any serial monitor first, since the port can't be
+shared:
+
+```bash
+python3 tools/screenshot.py landscape.png
 ```
 
 ## Architecture
