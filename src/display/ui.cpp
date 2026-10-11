@@ -70,7 +70,15 @@ struct Rect {
   bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 
-enum IconIndex { kIconVolume, kIconBrightness, kIconRotation, kIconPower, kIconKeys, kIconCount };
+enum IconIndex {
+  kIconVolume,
+  kIconBrightness,
+  kIconRotation,
+  kIconPower,
+  kIconKeys,
+  kIconMic,
+  kIconCount
+};
 
 struct Layout {
   bool landscape;
@@ -97,8 +105,8 @@ const Layout kPortrait = {
     true,
     48,
     kPortStatusCy,
-    {448, 520, 592, 668, 376},
-    {kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy},
+    {448, 520, 592, 668, 376, 304},
+    {kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy, kPortStatusCy},
     {0, PORT_ROW_Y, LCD_WIDTH, PORT_ROW_H},
     false,
     330,
@@ -119,8 +127,8 @@ const Layout kLandscape = {
     0,
     0,
     {LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X / 2, LAND_M8_X + LAND_M8_W + LAND_M8_X / 2,
-     LAND_M8_X + LAND_M8_W + LAND_M8_X / 2},
-    {40, 104, 168, 40, 104},
+     LAND_M8_X + LAND_M8_W + LAND_M8_X / 2, LAND_M8_X / 2},
+    {40, 104, 168, 40, 104, 232},
     {0, LAND_ROW_Y, LAND_M8_X, LAND_ROW_H},
     true,
     LAND_M8_X - 10,
@@ -908,6 +916,50 @@ Rect toggle_rect(const Layout &l) {
   return {l.row.x + kToggleInset, l.row.y + (l.row.h - kToggleH) / 2, kToggleW, kToggleH};
 }
 
+// The mic boost selector (0, +6, +12 dB): where the slider would be. Across the row in
+// portrait; stacked under the mic switch in landscape's panel, +12 on top.
+constexpr int kBoostOptions = 3;
+const char *const kBoostLabels[kBoostOptions] = {"0 dB", "+6 dB", "+12 dB"};
+
+Rect boost_rect(const Layout &l) {
+  const Rect tg = toggle_rect(l);
+  if (l.vertical) {
+    const int top = tg.y + tg.h + 24;
+    return {tg.x, top, tg.w, l.row.y + l.row.h - 8 - top};
+  }
+  return {l.row.x + kSliderInsetL, tg.y, l.row.w - kSliderInsetL - kToggleInset, tg.h};
+}
+
+// The boost option at (x, y) in the selector, or -1.
+int boost_at(const Layout &l, int x, int y) {
+  const Rect r = boost_rect(l);
+  const Rect zone = {r.x - 8, r.y - 8, r.w + 16, r.h + 16};
+  if (!zone.contains(x, y)) return -1;
+  int i = l.vertical ? (kBoostOptions - 1) - (y - r.y) * kBoostOptions / r.h
+                     : (x - r.x) * kBoostOptions / r.w;
+  return i < 0 ? 0 : (i >= kBoostOptions ? kBoostOptions - 1 : i);
+}
+
+void draw_boost_selector(Gfx &d, const Layout &l, int boost) {
+  const Rect r = boost_rect(l);
+  d.fillRoundRect(r.x, r.y, r.w, r.h, 8, kKeyFill);
+  d.setFont(&fonts::FreeSansBold12pt7b);
+  d.setTextDatum(textdatum_t::middle_center);
+  for (int i = 0; i < kBoostOptions; i++) {
+    Rect seg;
+    if (l.vertical) {
+      const int slot = kBoostOptions - 1 - i; // +12 on top
+      seg = {r.x, r.y + slot * r.h / kBoostOptions, r.w, r.h / kBoostOptions};
+    } else {
+      seg = {r.x + i * r.w / kBoostOptions, r.y, r.w / kBoostOptions, r.h};
+    }
+    if (i == boost) d.fillRoundRect(seg.x, seg.y, seg.w, seg.h, 8, kKeyFillDown);
+    d.setTextColor(i == boost ? kKeyLabelDown : kKeyLabel);
+    d.drawString(kBoostLabels[i], seg.x + seg.w / 2, seg.y + seg.h / 2);
+  }
+  d.drawRoundRect(r.x, r.y, r.w, r.h, 8, kKeyEdge);
+}
+
 void draw_slider(Gfx &d, const Track &t, int value, SliderRange r) {
   const int pos = t.lo + (value - r.min) * (t.hi - t.lo) / (r.max - r.min);
   char text[8];
@@ -1028,6 +1080,25 @@ void draw_layout_icon(Gfx &d, int cx, int cy, uint16_t color) {
 }
 
 // Output selector: a speaker and headphones side by side, the selected one lit.
+// Microphone; struck through in red when off.
+void draw_mic_icon(Gfx &d, int cx, int cy, uint16_t color, bool struck = false) {
+  d.fillRoundRect(cx - 6, cy - 16, 12, 21, 6, color); // capsule
+  d.fillArc(cx, cy - 5, 10, 12, 0, 180, color);       // cradle
+  d.fillRect(cx - 1, cy + 7, 3, 5, color);            // stem
+  d.fillRect(cx - 7, cy + 12, 15, 3, color);          // base
+  if (struck) d.drawWideLine(cx - 13, cy + 14, cx + 13, cy - 14, 1.5f, kErr);
+}
+
+// Mic switch: off and on side by side, the current one lit.
+void draw_mic_selector(Gfx &d, const Rect &r, bool on) {
+  const int half = r.w / 2, cy = r.y + r.h / 2;
+  d.fillRoundRect(r.x, r.y, r.w, r.h, 8, kKeyFill);
+  d.fillRoundRect(on ? r.x + half : r.x, r.y, half, r.h, 8, kKeyFillDown);
+  d.drawRoundRect(r.x, r.y, r.w, r.h, 8, kKeyEdge);
+  draw_mic_icon(d, r.x + half / 2, cy, on ? kKeyLabel : kKeyLabelDown, true);
+  draw_mic_icon(d, r.x + half + half / 2, cy, on ? kErr : kKeyLabel);
+}
+
 void draw_output_selector(Gfx &d, const Rect &r, bool headphones) {
   const int half = r.w / 2, cy = r.y + r.h / 2;
   d.fillRoundRect(r.x, r.y, r.w, r.h, 8, kKeyFill);
@@ -1044,6 +1115,9 @@ void paint_row(Gfx &d, const Layout &l, const Controls &c) {
   if (c.popup == Popup::kVolume) {
     draw_output_selector(d, tg, c.headphones);
     draw_slider(d, track(l), c.volume, slider_range(c.popup));
+  } else if (c.popup == Popup::kMic) {
+    draw_mic_selector(d, tg, c.mic_on);
+    draw_boost_selector(d, l, c.mic_boost);
   } else if (c.popup == Popup::kBrightness) {
     draw_sun_icon(d, tg.x + tg.w / 2, tg.y + tg.h / 2, kKeyLabel);
     draw_slider(d, track(l), c.brightness, slider_range(c.popup));
@@ -1076,13 +1150,14 @@ bool same(const Status &a, const Status &b) {
          a.oversized == b.oversized && a.volume == b.volume && a.headphones == b.headphones &&
          a.popup == b.popup && a.power == b.power && a.battery == b.battery &&
          a.power_mw == b.power_mw && a.rotation_locked == b.rotation_locked &&
-         a.compact_keys == b.compact_keys && a.message == b.message;
+         a.compact_keys == b.compact_keys && a.mic_on == b.mic_on && a.message == b.message;
 }
 
 bool same(const Controls &a, const Controls &b) {
   return a.popup == b.popup && a.volume == b.volume && a.headphones == b.headphones &&
          a.brightness == b.brightness && a.power == b.power && a.battery == b.battery &&
-         a.message == b.message && a.arrows == b.arrows;
+         a.message == b.message && a.arrows == b.arrows && a.mic_on == b.mic_on &&
+         a.mic_boost == b.mic_boost;
 }
 
 void apply_layout(Orientation o) {
@@ -1277,15 +1352,14 @@ void draw_status(const Status &s) {
     }
     if (s.message) snprintf(text, sizeof(text), "%s", s.message);
 
+    // No audio matters more than the firmware version (and there's no room for both).
+    const bool no_audio = !s.message && s.link == Status::Link::kConnected && !s.audio;
+    if (no_audio) snprintf(text, sizeof(text), "No audio");
     d.fillCircle(l.text_x - 20, l.text_y, 7, dot);
     d.setFont(&fonts::FreeSans12pt7b);
     d.setTextDatum(textdatum_t::middle_left);
-    d.setTextColor(s.message ? kKeyLabel : kStatusText);
+    d.setTextColor(s.message ? kKeyLabel : no_audio ? kWarn : kStatusText);
     d.drawString(text, l.text_x, l.text_y);
-    if (!s.message && s.link == Status::Link::kConnected && !s.audio) {
-      d.setTextColor(kWarn);
-      d.drawString("no audio", l.text_x + d.textWidth(text) + 14, l.text_y);
-    }
   }
 
   if (s.power_mw >= 0) {
@@ -1302,6 +1376,7 @@ void draw_status(const Status &s) {
     const Popup owner = i == kIconVolume       ? Popup::kVolume
                         : i == kIconBrightness ? Popup::kBrightness
                         : i == kIconPower      ? Popup::kPower
+                        : i == kIconMic        ? Popup::kMic
                                                : Popup::kNone;
     const bool lit = i == kIconKeys ? s.compact_keys : owner != Popup::kNone && s.popup == owner;
     draw_icon_zone(d, cx, cy, lit);
@@ -1321,6 +1396,9 @@ void draw_status(const Status &s) {
       break;
     case kIconPower:
       draw_power_icon(d, s, cx, cy);
+      break;
+    case kIconMic:
+      draw_mic_icon(d, cx, cy, s.mic_on ? kErr : kKeyLabel, !s.mic_on);
       break;
     case kIconKeys:
       draw_layout_icon(d, cx, cy, kKeyLabel);
@@ -1366,18 +1444,28 @@ Hit hit_test(int x, int y, Popup open, int *value) {
              : i == kIconBrightness ? Hit::kBrightnessIcon
              : i == kIconRotation   ? Hit::kRotationIcon
              : i == kIconKeys       ? Hit::kKeysIcon
+             : i == kIconMic        ? Hit::kMicIcon
                                     : Hit::kPowerIcon;
     }
   }
-  if (open != Popup::kVolume && open != Popup::kBrightness) return Hit::kNone;
+  if (open != Popup::kVolume && open != Popup::kBrightness && open != Popup::kMic) {
+    return Hit::kNone;
+  }
   if (!l.row.contains(x, y)) return Hit::kNone;
 
   const Rect tg = toggle_rect(l);
   const Rect toggle_zone = {tg.x - 8, tg.y - 8, tg.w + 16, tg.h + 16};
-  if (open == Popup::kVolume && (l.vertical ? toggle_zone.contains(x, y)
-                                            : x >= toggle_zone.x && x < toggle_zone.x + toggle_zone.w)) {
-    *value = x < tg.x + tg.w / 2 ? 0 : 1; // the speaker or headphones half
-    return Hit::kOutputToggle;
+  const bool on_toggle = l.vertical ? toggle_zone.contains(x, y)
+                                    : x >= toggle_zone.x && x < toggle_zone.x + toggle_zone.w;
+  if (on_toggle && open != Popup::kBrightness) {
+    *value = x < tg.x + tg.w / 2 ? 0 : 1; // the left or right half
+    return open == Popup::kVolume ? Hit::kOutputToggle : Hit::kMicToggle;
+  }
+  if (open == Popup::kMic) {
+    const int boost = boost_at(l, x, y);
+    if (boost < 0) return Hit::kNone;
+    *value = boost;
+    return Hit::kMicBoost;
   }
   const Track t = track(l);
   const int along = t.vertical ? y : x;

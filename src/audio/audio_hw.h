@@ -26,4 +26,16 @@ void write(const int16_t *stereo, int frames);
 // Headphone jack state: 1 inserted, 0 not inserted, -1 unknown (detection not configured).
 int headphones_inserted();
 
+// Microphones: the ES7210 ADC, MIC1 and MIC2 as left and right, on the same I2S bus.
+// Powers the mic ADC up and starts capture, or stops capture and powers it down.
+bool mic_enable(bool on);
+
+// Mic preamp gain, 0..kMicGainMax (ES7210 PGA steps, 0..37.5 dB).
+constexpr int kMicGainMax = 14;
+void mic_set_gain(int step);
+
+// Reads up to `frames` stereo frames of mic audio, waiting up to `wait_ms` for them. Returns
+// the number read.
+int mic_read(int16_t *stereo, int frames, int wait_ms);
+
 } // namespace audio_hw

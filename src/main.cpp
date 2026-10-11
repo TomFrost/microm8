@@ -15,6 +15,7 @@
 
 #include "audio/audio_hw.h"
 #include "audio/audio_out.h"
+#include "audio/mic.h"
 #include "board.h"
 #include "config.h"
 #include "diag/log_capture.h"
@@ -70,6 +71,7 @@ void save_settings() {
   prefs.putUChar("bright", (uint8_t)brightness.load());
   prefs.putUChar("rot_lock", rotation_locked ? 1 : 0);
   prefs.putUChar("compact", compact_keys ? 1 : 0);
+  prefs.putUChar("mic_boost", (uint8_t)mic::boost());
   prefs.putUChar("orient", (uint8_t)ui::orientation());
 }
 
@@ -150,6 +152,18 @@ void log_audio(uint32_t now, uint32_t log_from) {
            (unsigned long)a.packets_failed, a.last_packet_status, (unsigned long)a.bytes,
            audio::take_peak(), (unsigned long)audio::buffered_ms(),
            (unsigned long)audio::underruns());
+  if (mic::enabled()) {
+    const m8usb::InputStats in = m8usb::input_stats_snapshot();
+    ESP_LOGI(TAG,
+             "mic: loudest sample %d, buffered %lu ms, %lu underruns; to the M8: %lu packets ok, "
+             "%lu failed; M8 rate %.4f samples/microframe (%lu reports used; last raw 0x%08lX, "
+             "%lu bytes; %lu empty, %lu failed)",
+             mic::take_peak(), (unsigned long)mic::buffered_ms(), (unsigned long)mic::underruns(),
+             (unsigned long)in.packets_ok, (unsigned long)in.packets_failed,
+             in.feedback / 65536.0, (unsigned long)in.feedback_count,
+             (unsigned long)in.feedback_raw, (unsigned long)in.feedback_bytes,
+             (unsigned long)in.feedback_empty, (unsigned long)in.feedback_failed);
+  }
   ui::log_display_stats();
 }
 
@@ -190,6 +204,7 @@ void ui_task(void *) {
   uint32_t settings_dirty_since = 0;
   uint32_t last_power_log = 0;
   uint32_t log_from = 0; // when the audio/display report window started
+  bool mic_was_on = false;
   int applied_brightness = -1;
   bool applied_compact = compact_keys;
   uint32_t shown_log_version = logcap::version() - 1; // draw the log on the first frame
@@ -237,6 +252,10 @@ void ui_task(void *) {
     }
 
     poll_jack_detect(now);
+    if (mic::enabled() != mic_was_on) { // report on the mic's audio after switching it
+      mic_was_on = mic::enabled();
+      log_from = now ? now : 1;
+    }
     log_audio(now, log_from);
     if (compact_keys != applied_compact) {
       applied_compact = compact_keys;
@@ -299,6 +318,7 @@ void ui_task(void *) {
       st.power_mw = MICROM8_POWER_DIAG ? board::power_draw_mw() : -1;
       st.rotation_locked = rotation_locked;
       st.compact_keys = applied_compact;
+      st.mic_on = mic::enabled();
       const uint32_t message_since = message_at;
       if (message_since && (int32_t)(now - message_since) < (int32_t)kMessageMs) {
         st.message = st.rotation_locked ? "Rotation locked" : "Rotation enabled";
@@ -313,6 +333,8 @@ void ui_task(void *) {
       controls.battery = st.battery;
       controls.message = st.message;
       controls.arrows = held & kArrowKeys;
+      controls.mic_on = st.mic_on;
+      controls.mic_boost = mic::boost();
       ui::draw_controls(controls);
 
       ui::flush_m8();
@@ -360,6 +382,13 @@ void set_slider(ui::Popup row, int value) {
   }
 }
 
+// The mic feeds the M8's USB audio input while on. Not saved: it starts off, so the speaker
+// can't unexpectedly feed back into it.
+void set_mic(bool on) {
+  mic::set_enabled(on);
+  m8usb::set_input_enabled(on);
+}
+
 // A finger has landed: act on any target under it and give it its role.
 void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
   const ui::Popup open = popup;
@@ -381,6 +410,18 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
   case ui::Hit::kKeysIcon:
     compact_keys = !compact_keys;
     settings_changed = true;
+    break;
+  case ui::Hit::kMicIcon:
+    popup = open == ui::Popup::kMic ? ui::Popup::kNone : ui::Popup::kMic;
+    break;
+  case ui::Hit::kMicToggle:
+    set_mic(value != 0);
+    break;
+  case ui::Hit::kMicBoost:
+    if (value != mic::boost()) {
+      mic::set_boost(value);
+      settings_changed = true;
+    }
     break;
   case ui::Hit::kRotationIcon:
     rotation_locked = !rotation_locked;
@@ -573,9 +614,10 @@ void setup() {
   if (!audio::start(speaker_volume, headphone_volume, output)) {
     ESP_LOGE(TAG, "audio init failed");
   }
+  if (!mic::start(prefs.getUChar("mic_boost", 0))) ESP_LOGE(TAG, "mic init failed");
 
   rx_stream = xStreamBufferCreate(kRxStreamBytes, 1);
-  if (!m8usb::start(rx_stream, audio_sink)) ESP_LOGE(TAG, "USB host init failed");
+  if (!m8usb::start(rx_stream, audio_sink, mic::pull)) ESP_LOGE(TAG, "USB host init failed");
 
   xTaskCreatePinnedToCore(ui_task, "ui", 8192, nullptr, 10, nullptr, UI_CORE);
   if (touch_ok) xTaskCreatePinnedToCore(touch_task, "touch", 4096, nullptr, 12, nullptr, UI_CORE);

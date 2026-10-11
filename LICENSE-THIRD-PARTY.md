@@ -135,8 +135,8 @@ SOFTWARE.
 
 Source: https://github.com/m5stack/M5Unified
 
-Used in: `src/audio/audio_hw.cpp` (ES8388 codec register settings for the Tab5) and
-`src/config.h` (Tab5 audio pins and I/O expander bits).
+Used in: `src/audio/audio_hw.cpp` (ES8388 codec and ES7210 mic ADC register settings for the
+Tab5) and `src/config.h` (Tab5 audio pins and I/O expander bits).
 
 ```
 MIT License

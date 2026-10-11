@@ -1,8 +1,8 @@
 // Tab5 audio hardware: the ES8388 codec on I2S0 drives both the headphone jack and the
-// NS4150B speaker amp. The ES7210 mic ADC shares the bus (data in on GPIO 28); its receive
-// channel is created here so microphone sampling can be added without reworking the bus.
+// NS4150B speaker amp. The ES7210 mic ADC shares the bus (its data in on GPIO 28), slaved to
+// the same clocks, so mic capture runs at the playback rate.
 //
-// The ES8388 register sequence comes from M5Stack's M5Unified (MIT); see
+// The ES8388 and ES7210 register sequences come from M5Stack's M5Unified (MIT); see
 // LICENSE-THIRD-PARTY.md.
 #include "audio/audio_hw.h"
 
@@ -37,7 +37,33 @@ constexpr uint8_t kChipPowerResetStm = 0xF0; // digital powered down, ADC/DAC st
 constexpr uint8_t kChipPowerDacOn = 0x0A;    // DAC up; ADC DLL and reference down
 
 i2s_chan_handle_t tx;
-i2s_chan_handle_t rx; // for the mics; created but not enabled yet
+i2s_chan_handle_t rx; // the mics; enabled by mic_enable()
+bool rx_on;
+
+// ES7210 for the Tab5's two mics: MIC1/MIC2 as left/right on SDOUT1, standard I2S, 16-bit,
+// MIC3/MIC4 (unused) powered down. {register, value} pairs, from M5Unified's Tab5 setup.
+constexpr uint8_t kEs7210Addr = 0x40;
+constexpr uint8_t kEs7210Gain1 = 0x43, kEs7210Gain2 = 0x44;
+constexpr uint8_t kEs7210GainEnable = 0x10; // PGA on, plus the step in the low nibble
+constexpr uint8_t kEs7210Init[][2] = {
+    {0x00, 0xFF}, {0x00, 0x41}, // reset
+    {0x01, 0x1F},               // clocks off while configuring
+    {0x06, 0x00},               // digital power up
+    {0x07, 0x20},               // ADC oversampling
+    {0x08, 0x10},               // slave mode
+    {0x09, 0x30}, {0x0A, 0x30}, // chip init timing
+    {0x20, 0x0A}, {0x21, 0x2A}, {0x22, 0x0A}, {0x23, 0x2A}, // high-pass filters
+    {0x02, 0xC1}, {0x04, 0x01}, {0x05, 0x00}, // clock dividers
+    {0x11, 0x60},               // 16-bit, I2S
+    {0x40, 0x42},               // analog power
+    {0x41, 0x70}, {0x42, 0x70}, // mic bias
+    {0x45, 0x00}, {0x46, 0x00}, // MIC3/4 gain
+    {0x47, 0x00}, {0x48, 0x00}, {0x49, 0x00}, {0x4A, 0x00}, // low power off
+    {0x4B, 0x00},               // MIC1/2 powered
+    {0x4C, 0xFF},               // MIC3/4 powered down
+    {0x01, 0x14},               // clocks on
+};
+int mic_gain_step = 11; // 33 dB, as M5Unified uses
 
 // ES8388 in I2S slave mode, 16-bit, DAC on, all four outputs (LOUT1/ROUT1 headphone,
 // LOUT2/ROUT2 speaker) enabled, ADC powered down. {register, value} pairs.
@@ -69,7 +95,53 @@ void set_speaker_amp(bool on) {
   }
 }
 
+void write_es7210_gain() {
+  const uint8_t v = kEs7210GainEnable | (uint8_t)mic_gain_step;
+  board::I2CLock lock;
+  M5.In_I2C.writeRegister8(kEs7210Addr, kEs7210Gain1, v, kI2cHz);
+  M5.In_I2C.writeRegister8(kEs7210Addr, kEs7210Gain2, v, kI2cHz);
+}
+
 } // namespace
+
+bool mic_enable(bool on) {
+  if (on == rx_on) return true;
+  bool ok = true;
+  if (on) {
+    {
+      board::I2CLock lock;
+      for (const auto &rv : kEs7210Init) {
+        ok &= M5.In_I2C.writeRegister8(kEs7210Addr, rv[0], rv[1], kI2cHz);
+      }
+    }
+    write_es7210_gain();
+    if (!ok) ESP_LOGE(TAG, "ES7210 setup failed (I2C)");
+    ok = ok && i2s_channel_enable(rx) == ESP_OK;
+  } else {
+    i2s_channel_disable(rx);
+    board::I2CLock lock;
+    M5.In_I2C.writeRegister8(kEs7210Addr, 0x4B, 0xFF, kI2cHz); // MIC1/2 powered down
+    M5.In_I2C.writeRegister8(kEs7210Addr, 0x06, 0x07, kI2cHz); // digital powered down
+  }
+  rx_on = on && ok;
+  ESP_LOGI(TAG, "mics %s", rx_on ? "on" : "off");
+  return ok;
+}
+
+void mic_set_gain(int step) {
+  if (step < 0) step = 0;
+  if (step > kMicGainMax) step = kMicGainMax;
+  mic_gain_step = step;
+  if (rx_on) write_es7210_gain();
+}
+
+int mic_read(int16_t *stereo, int frames, int wait_ms) {
+  if (!rx_on) return 0;
+  size_t got = 0;
+  i2s_channel_read(rx, stereo, (size_t)frames * 2 * sizeof(int16_t), &got,
+                   pdMS_TO_TICKS(wait_ms));
+  return (int)(got / (2 * sizeof(int16_t)));
+}
 
 bool begin(int sample_rate) {
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);

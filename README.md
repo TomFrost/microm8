@@ -77,9 +77,27 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
   details in words.
 - **Sliders:** once a finger grabs a slider, the slider follows it until it lifts, wherever
   it moves. Slide your thumb off to see the knob.
+- **Mic icon:** opens the mic row: an off/on switch and a boost selector (see Recording below).
+  Struck through while off, red while live.
 - Rows open under the status bar (in landscape, in the left panel) without covering the M8
   screen, and close when you tap the icon again or 4 seconds after the last touch. Volumes,
-  output and brightness are saved to flash.
+  output, brightness and mic boost are saved to flash.
+
+## Recording
+
+The Tab5's two microphones can be recorded on the M8 like any input:
+
+1. Tap the mic icon and switch the mic on (it starts off at every power-on, so the speaker
+   can't unexpectedly feed back into it). The icon turns red.
+2. In the M8's sample recorder, set SRC to Line (or MIC: on the Headless they're the same
+   input). The USB source records nothing from the Tab5.
+3. Set the level with the recorder's VOL; FF gives a good level for speech within about a
+   foot. If that's not enough, the mic row's boost adds +6 or +12 dB digitally, which raises
+   the noise along with the signal.
+
+The mics arrive as stereo (left and right mic), streamed to the M8's USB audio input at the
+M8's own clock rate (from its feedback endpoint), so recordings don't crackle. Use headphones,
+or turn the M8's input monitoring down, if the speaker feeds back into the mics.
 
 ## Hardware setup
 
@@ -115,13 +133,14 @@ pio test -e native
 
 | Module | Role |
 |---|---|
-| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
+| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight. While the mic is on, streams to the M8's audio input, sizing each packet from the M8's rate feedback. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
 | `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. Ported from m8c. |
 | `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
 | `src/display/ui.cpp` | Portrait and landscape layouts. Changed areas of the M8 screen are scaled (pixel-area resampling) in the panel's native orientation into internal RAM, then copied into the panel's framebuffer by the DSI driver's 2D DMA, timed against the panel's scan so updates don't tear. Keys, status icons, the volume/brightness/power row and the landscape arrow pad are drawn through M5GFX. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
 | `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and the portrait and landscape key layouts and hit-testing. `main.cpp` gives each finger a role (keys, slider, swipe, arrow pad) and produces the M8 key bitmask (`'C'` + mask). |
 | `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), a silence gate so the codec goes quiet between songs, per-output volume levels, mono mix for the speaker. |
-| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. |
+| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. The ES7210 mic ADC on the same bus. |
+| `src/audio/mic.cpp` | Mic capture: reads the mics into a buffer that the USB task drains at the M8's rate, dropping or repeating single frames to absorb clock drift. Optional digital boost. |
 | `src/board.cpp` | M5Unified bring-up, USB-A 5 V, and the lock for the shared internal I2C bus. Switches off hardware microm8 doesn't use (the ESP32-C6 wireless chip and the camera). Battery state from the INA226 current sensor: charging, plugged in, or no battery. |
 
 FreeRTOS tasks: USB and audio run on core 0; display and touch run on core 1. Serial data
@@ -131,12 +150,10 @@ USB.
 ## Status
 
 **Working on the Tab5:** the M8 connects over high-speed USB, and its screen, keys, and audio
-through the speaker and headphones all work.
+through the speaker and headphones all work, as does recording from the Tab5's mics.
 
 ### Roadmap
 
-- **Sampling into the M8:** stream the Tab5's ES7210 microphones to the M8's USB audio input
-  (asynchronous, with a rate-feedback endpoint).
 - **USB MIDI keyboard on USB-C:** run the P4's second USB controller as a host and forward a
   keyboard's MIDI to the M8's USB MIDI input. Open question: whether USB-C can supply 5 V to
   a bus-powered keyboard.

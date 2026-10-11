@@ -51,6 +51,16 @@ M8's actual rate in the high-speed feedback format (16.16 fixed point, samples p
 microframe; nominally ~5.51 for 44.1 kHz). A host sending to `0x05` must size its packets
 from this value to stay locked to the M8's clock.
 
+In practice the M8 reports **16.16 samples per data packet** (two microframes): about
+`0x000B0660` = 11.025, not the spec's per-microframe 5.51. Without the feedback, the M8's
+clock (about 0.02% off the Tab5's) slowly over- or under-runs its input buffer, which is
+audible as occasional crackles.
+
+On the Headless, audio sent to `0x05` arrives as the sample recorder's Line (and MIC) source;
+the USB source records nothing from it. The input's feature unit (`0x31`) reports a linear
+0..255 volume (default 128) rather than the spec's 1/256 dB, and changing it had no effect on
+recordings.
+
 A full-speed host interprets `bInterval 2` as 2 ms and can move at most 48 bytes per
 packet, so it receives about one eighth of the audio. This is why USB audio fails on the
 ESP32-S3 and needs a high-speed host such as the ESP32-P4.

@@ -37,6 +37,17 @@ constexpr int kIsoTransfers = 4;
 // The M8's audio endpoints use bInterval 2: one packet per 250 us at high speed. 16 packets
 // make a 4 ms transfer; with 4 in flight there's 16 ms of slack for the client task.
 constexpr int kIsoPacketsPerTransfer = 16;
+// Audio to the M8 (its USB input): the same 250 us packets, sized from the M8's feedback.
+constexpr int kIsoOutTransfers = 4;
+constexpr int kIsoOutPackets = 16;
+// Feedback from the M8: one 4-byte value per ms.
+constexpr int kFeedbackTransfers = 2;
+constexpr int kFeedbackPackets = 4;
+// High-speed feedback is 16.16 samples per microframe: 44.1 kHz is 5.5125.
+constexpr uint32_t kFeedbackNominal = (uint32_t)(44100.0 / 8000.0 * 65536.0);
+constexpr uint32_t kFeedbackMin = kFeedbackNominal * 98 / 100;
+constexpr uint32_t kFeedbackMax = kFeedbackNominal * 102 / 100;
+constexpr int kOutMicroframesPerPacket = 2; // bInterval 2
 constexpr int kOutMaxLen = 8;
 
 // If no device has enumerated for this long, power-cycle the root port: the host-side
@@ -58,6 +69,14 @@ struct Endpoints {
   uint8_t audio_alt = 0;
   uint8_t iso_in = 0;
   uint16_t iso_mps = 0;
+
+  // The M8's audio input
+  int input_iface = -1;
+  uint8_t input_alt = 0;
+  uint8_t iso_out = 0;
+  uint16_t iso_out_mps = 0;
+  uint8_t feedback_in = 0;
+  uint16_t feedback_mps = 0;
 };
 
 usb_host_client_handle_t client;
@@ -66,6 +85,11 @@ Endpoints eps;
 
 StreamBufferHandle_t rx_stream;
 AudioSink audio_sink;
+AudioSource audio_source;
+volatile bool want_input; // set from any task
+bool input_on;            // client task only
+uint32_t feedback = kFeedbackNominal;
+uint32_t out_acc;         // fractional samples carried between packets, 16.16
 QueueHandle_t out_queue;
 
 volatile State cur_state = State::kWaiting;
@@ -80,6 +104,9 @@ bool pending_gone;
 // usb_host_client_handle_events on that task).
 usb_transfer_t *bulk_in_xfer[kBulkInTransfers];
 usb_transfer_t *iso_xfer[kIsoTransfers];
+usb_transfer_t *iso_out_xfer[kIsoOutTransfers];
+usb_transfer_t *feedback_xfer[kFeedbackTransfers];
+int input_inflight; // of the transfers above
 usb_transfer_t *out_xfer;
 usb_transfer_t *ctrl_xfer;
 int inflight;
@@ -87,6 +114,7 @@ bool out_busy;
 bool tearing_down;
 uint32_t rx_dropped;
 AudioStats iso_stats; // written by the client task, read elsewhere as a snapshot
+InputStats input_stats;
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -168,6 +196,108 @@ void iso_in_cb(usb_transfer_t *t) {
     iso_stats.last_urb_status = t->status;
   }
   resubmit(t);
+}
+
+// Fills an OUT transfer with audio for the M8: each packet carries the samples the M8's clock
+// has advanced by (from its feedback), 11 or 12 frames.
+void fill_out(usb_transfer_t *t) {
+  const int max_frames = eps.iso_out_mps / 4;
+  int offset = 0;
+  for (int p = 0; p < kIsoOutPackets; p++) {
+    out_acc += feedback * kOutMicroframesPerPacket;
+    int frames = (int)(out_acc >> 16);
+    out_acc &= 0xFFFF;
+    if (frames > max_frames) frames = max_frames;
+    if (audio_source) {
+      audio_source((int16_t *)(t->data_buffer + offset), frames);
+    } else {
+      memset(t->data_buffer + offset, 0, frames * 4);
+    }
+    t->isoc_packet_desc[p].num_bytes = frames * 4;
+    offset += frames * 4;
+  }
+  t->num_bytes = offset;
+}
+
+void submit_input(usb_transfer_t *t) {
+  if (tearing_down || !input_on) return;
+  if (usb_host_transfer_submit(t) == ESP_OK) {
+    input_inflight++;
+  } else {
+    ESP_LOGW(TAG, "resubmit failed on EP 0x%02X", t->bEndpointAddress);
+  }
+}
+
+void iso_out_cb(usb_transfer_t *t) {
+  input_inflight--;
+  if (t->status == USB_TRANSFER_STATUS_NO_DEVICE || t->status == USB_TRANSFER_STATUS_CANCELED) {
+    return;
+  }
+  if (t->status == USB_TRANSFER_STATUS_COMPLETED) {
+    for (int i = 0; i < t->num_isoc_packets; i++) {
+      if (t->isoc_packet_desc[i].status == USB_TRANSFER_STATUS_COMPLETED) {
+        input_stats.packets_ok++;
+      } else {
+        input_stats.packets_failed++;
+      }
+    }
+  } else {
+    input_stats.packets_failed += t->num_isoc_packets;
+  }
+  fill_out(t);
+  submit_input(t);
+}
+
+// A feedback report as 16.16 samples per microframe, or 0 if it doesn't look like 44.1 kHz in
+// any of the units devices use. The M8 reports 16.16 samples per data packet (2 microframes:
+// 11.025). The spec's high-speed unit is per microframe, and some devices report per frame.
+uint32_t parse_feedback(const uint8_t *b, int bytes) {
+  if (bytes < 3) return 0;
+  const uint32_t v = b[0] | (b[1] << 8) | (b[2] << 16) | (bytes >= 4 ? (uint32_t)b[3] << 24 : 0);
+  const uint32_t candidates[] = {
+      v / kOutMicroframesPerPacket, // per data packet (the M8)
+      v,                            // per microframe
+      v / 8,                        // per frame (1 ms)
+  };
+  for (uint32_t c : candidates) {
+    if (c >= kFeedbackMin && c <= kFeedbackMax) return c;
+  }
+  return 0;
+}
+
+void feedback_cb(usb_transfer_t *t) {
+  input_inflight--;
+  if (t->status == USB_TRANSFER_STATUS_NO_DEVICE || t->status == USB_TRANSFER_STATUS_CANCELED) {
+    return;
+  }
+  if (t->status == USB_TRANSFER_STATUS_COMPLETED) {
+    int offset = 0;
+    for (int i = 0; i < t->num_isoc_packets; i++) {
+      const usb_isoc_packet_desc_t &p = t->isoc_packet_desc[i];
+      if (p.status != USB_TRANSFER_STATUS_COMPLETED) {
+        input_stats.feedback_failed++;
+      } else if (p.actual_num_bytes == 0) {
+        input_stats.feedback_empty++;
+      } else {
+        const uint8_t *b = t->data_buffer + offset;
+        input_stats.feedback_raw = 0;
+        for (int k = 0; k < p.actual_num_bytes && k < 4; k++) {
+          input_stats.feedback_raw |= (uint32_t)b[k] << (8 * k);
+        }
+        input_stats.feedback_bytes = p.actual_num_bytes;
+        const uint32_t v = parse_feedback(b, p.actual_num_bytes);
+        if (v) {
+          feedback = v;
+          input_stats.feedback = v;
+          input_stats.feedback_count++;
+        }
+      }
+      offset += p.num_bytes;
+    }
+  } else {
+    input_stats.feedback_failed += t->num_isoc_packets;
+  }
+  submit_input(t);
 }
 
 void out_cb(usb_transfer_t *t) {
@@ -308,11 +438,22 @@ void parse_config(const usb_config_desc_t *cfg) {
       }
     } else if (intf->bInterfaceClass == kClassAudio &&
                intf->bInterfaceSubClass == kSubclassAudioStreaming &&
-               type == USB_BM_ATTRIBUTES_XFER_ISOC && in && eps.audio_iface < 0) {
-      eps.audio_iface = intf->bInterfaceNumber;
-      eps.audio_alt = intf->bAlternateSetting;
-      eps.iso_in = ep->bEndpointAddress;
-      eps.iso_mps = mps;
+               type == USB_BM_ATTRIBUTES_XFER_ISOC) {
+      const bool feedback_ep = ((ep->bmAttributes >> 4) & 3) == 1;
+      if (in && !feedback_ep && eps.audio_iface < 0) { // M8 audio out
+        eps.audio_iface = intf->bInterfaceNumber;
+        eps.audio_alt = intf->bAlternateSetting;
+        eps.iso_in = ep->bEndpointAddress;
+        eps.iso_mps = mps;
+      } else if (!in && eps.input_iface < 0) { // M8 audio in
+        eps.input_iface = intf->bInterfaceNumber;
+        eps.input_alt = intf->bAlternateSetting;
+        eps.iso_out = ep->bEndpointAddress;
+        eps.iso_out_mps = mps;
+      } else if (in && feedback_ep && intf->bInterfaceNumber == eps.input_iface) {
+        eps.feedback_in = ep->bEndpointAddress;
+        eps.feedback_mps = mps;
+      }
     }
   }
 }
@@ -439,23 +580,115 @@ bool start_audio() {
   return true;
 }
 
+// Halts, flushes and clears endpoints, so their transfers come back cancelled.
+void cancel_endpoints(const uint8_t *endpoints, int n) {
+  for (int i = 0; i < n; i++) {
+    if (!endpoints[i]) continue;
+    usb_host_endpoint_halt(dev, endpoints[i]);
+    usb_host_endpoint_flush(dev, endpoints[i]);
+    usb_host_endpoint_clear(dev, endpoints[i]);
+  }
+}
+
+// Starts streaming audio to the M8's USB input: selects the input's streaming alternate
+// setting, then keeps feedback and audio transfers in flight.
+bool start_input() {
+  if (eps.input_iface < 0 || !eps.iso_out || !eps.iso_out_mps) {
+    ESP_LOGW(TAG, "the M8 has no USB audio input");
+    return false;
+  }
+  esp_err_t err = usb_host_interface_claim(client, dev, eps.input_iface, eps.input_alt);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "claim input iface %d alt %d: %s", eps.input_iface, eps.input_alt,
+             esp_err_to_name(err));
+    return false;
+  }
+  err = control(USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_STANDARD |
+                    USB_BM_REQUEST_TYPE_RECIP_INTERFACE,
+                USB_B_REQUEST_SET_INTERFACE, eps.input_alt, eps.input_iface, nullptr, 0);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "SET_INTERFACE input: %s", esp_err_to_name(err));
+    usb_host_interface_release(client, dev, eps.input_iface);
+    return false;
+  }
+
+  input_on = true;
+  feedback = kFeedbackNominal;
+  out_acc = 0;
+  if (eps.feedback_in) {
+    for (int i = 0; i < kFeedbackTransfers; i++) {
+      if (!feedback_xfer[i] &&
+          usb_host_transfer_alloc(eps.feedback_mps * kFeedbackPackets, kFeedbackPackets,
+                                  &feedback_xfer[i]) != ESP_OK) {
+        break;
+      }
+      usb_transfer_t *t = feedback_xfer[i];
+      t->device_handle = dev;
+      t->bEndpointAddress = eps.feedback_in;
+      t->callback = feedback_cb;
+      t->num_bytes = eps.feedback_mps * kFeedbackPackets;
+      for (int p = 0; p < kFeedbackPackets; p++) {
+        t->isoc_packet_desc[p].num_bytes = eps.feedback_mps;
+      }
+      submit_input(t);
+    }
+  }
+  for (int i = 0; i < kIsoOutTransfers; i++) {
+    if (!iso_out_xfer[i] &&
+        usb_host_transfer_alloc(eps.iso_out_mps * kIsoOutPackets, kIsoOutPackets,
+                                &iso_out_xfer[i]) != ESP_OK) {
+      ESP_LOGE(TAG, "iso OUT transfer alloc failed");
+      break;
+    }
+    usb_transfer_t *t = iso_out_xfer[i];
+    t->device_handle = dev;
+    t->bEndpointAddress = eps.iso_out;
+    t->callback = iso_out_cb;
+    fill_out(t);
+    submit_input(t);
+  }
+  ESP_LOGI(TAG, "audio input streaming: iface %d alt %d EP 0x%02X mps %u, feedback EP 0x%02X",
+           eps.input_iface, eps.input_alt, eps.iso_out, eps.iso_out_mps, eps.feedback_in);
+  return true;
+}
+
+void stop_input() {
+  if (!input_on) return;
+  input_on = false; // callbacks stop resubmitting
+  const uint8_t endpoints[] = {eps.iso_out, eps.feedback_in};
+  cancel_endpoints(endpoints, 2);
+  const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(500);
+  while (input_inflight > 0 && xTaskGetTickCount() < deadline) {
+    usb_host_client_handle_events(client, pdMS_TO_TICKS(10));
+  }
+  if (input_inflight > 0) ESP_LOGW(TAG, "%d input transfers still in flight", input_inflight);
+  input_inflight = 0;
+  // Back to the zero-bandwidth alternate setting.
+  control(USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_STANDARD |
+              USB_BM_REQUEST_TYPE_RECIP_INTERFACE,
+          USB_B_REQUEST_SET_INTERFACE, 0, eps.input_iface, nullptr, 0);
+  usb_host_interface_release(client, dev, eps.input_iface);
+  ESP_LOGI(TAG, "audio input stopped");
+}
+
 void release_all() {
   tearing_down = true;
 
-  const uint8_t endpoints[] = {eps.bulk_in, eps.bulk_out, eps.iso_in};
-  for (uint8_t ep : endpoints) {
-    if (!ep) continue;
-    usb_host_endpoint_halt(dev, ep);
-    usb_host_endpoint_flush(dev, ep);
-    usb_host_endpoint_clear(dev, ep);
-  }
+  const bool had_input = input_on;
+  input_on = false;
+  const uint8_t endpoints[] = {eps.bulk_in, eps.bulk_out, eps.iso_in, eps.iso_out,
+                               eps.feedback_in};
+  cancel_endpoints(endpoints, sizeof(endpoints));
 
   // Let cancelled/failed transfers drain back through their callbacks.
   const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(500);
-  while (inflight > 0 && xTaskGetTickCount() < deadline) {
+  while ((inflight > 0 || input_inflight > 0) && xTaskGetTickCount() < deadline) {
     usb_host_client_handle_events(client, pdMS_TO_TICKS(10));
   }
-  if (inflight > 0) ESP_LOGW(TAG, "%d transfers still in flight at teardown", inflight);
+  if (inflight > 0 || input_inflight > 0) {
+    ESP_LOGW(TAG, "%d transfers still in flight at teardown", inflight + input_inflight);
+  }
+  if (had_input) usb_host_interface_release(client, dev, eps.input_iface);
 
   if (eps.audio_iface >= 0) usb_host_interface_release(client, dev, eps.audio_iface);
   if (eps.data_iface >= 0) usb_host_interface_release(client, dev, eps.data_iface);
@@ -465,6 +698,7 @@ void release_all() {
   dev = nullptr;
   eps = Endpoints{};
   inflight = 0;
+  input_inflight = 0;
   out_busy = false;
   audio_on = false;
   tearing_down = false;
@@ -614,14 +848,24 @@ void client_task(void *) {
       open_device(addr);
     }
     pump_out_queue();
+
+    // Audio to the M8's input follows the mic switch.
+    if (cur_state == State::kConnected && want_input != input_on) {
+      if (want_input) {
+        if (!start_input()) want_input = false; // don't retry every loop
+      } else {
+        stop_input();
+      }
+    }
   }
 }
 
 } // namespace
 
-bool start(StreamBufferHandle_t rx, AudioSink audio) {
+bool start(StreamBufferHandle_t rx, AudioSink audio, AudioSource input) {
   rx_stream = rx;
   audio_sink = audio;
+  audio_source = input;
   out_queue = xQueueCreate(32, sizeof(OutMsg));
 
   usb_host_config_t host_cfg = {};
@@ -644,6 +888,12 @@ State state() { return cur_state; }
 uint32_t connection_count() { return connections; }
 bool audio_streaming() { return audio_on; }
 AudioStats audio_stats() { return iso_stats; }
+InputStats input_stats_snapshot() { return input_stats; }
+
+void set_input_enabled(bool on) {
+  want_input = on;
+  if (client) usb_host_client_unblock(client);
+}
 
 bool send(const uint8_t *data, size_t len) {
   if (len == 0 || len > kOutMaxLen || cur_state != State::kConnected) return false;

@@ -23,9 +23,16 @@ enum class State : uint8_t {
 // Called from the USB task with raw PCM (S16LE stereo) from each isochronous packet.
 using AudioSink = void (*)(const uint8_t *pcm, size_t bytes);
 
+// Called from the USB task to fill `frames` stereo frames of audio for the M8's USB input.
+using AudioSource = void (*)(int16_t *stereo, int frames);
+
 // Installs the USB host stack and starts its tasks. Serial bytes from the M8 are written to
-// `rx` (single reader). `audio` may be null.
-bool start(StreamBufferHandle_t rx, AudioSink audio);
+// `rx` (single reader). `audio` and `input` may be null.
+bool start(StreamBufferHandle_t rx, AudioSink audio, AudioSource input);
+
+// Streams audio from the input source to the M8's USB audio input while on (and an M8 is
+// connected). Any task.
+void set_input_enabled(bool on);
 
 State state();
 
@@ -42,6 +49,16 @@ struct AudioStats {
   int last_urb_status, last_packet_status; // usb_transfer_status_t
 };
 AudioStats audio_stats();
+
+// Audio to the M8's input, for diagnostics. `feedback` is the M8's rate, 16.16 samples per
+// microframe (5.5125 at 44.1 kHz).
+struct InputStats {
+  uint32_t packets_ok, packets_failed;
+  uint32_t feedback, feedback_count;          // last accepted report, and how many
+  uint32_t feedback_raw, feedback_bytes;      // the last report as received
+  uint32_t feedback_empty, feedback_failed;   // reports that carried nothing, or failed
+};
+InputStats input_stats_snapshot();
 
 // Queues bytes for the M8's CDC OUT endpoint. Thread-safe. len <= 8.
 bool send(const uint8_t *data, size_t len);

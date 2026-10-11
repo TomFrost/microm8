@@ -14,7 +14,7 @@ namespace ui {
 enum class Orientation : uint8_t { kPortrait, kLandscape, kPortraitFlipped, kLandscapeFlipped };
 
 // Which row is open under the status bar: a slider, or battery details.
-enum class Popup : uint8_t { kNone, kVolume, kBrightness, kPower };
+enum class Popup : uint8_t { kNone, kVolume, kBrightness, kPower, kMic };
 
 // Where power is coming from, for the status-bar icon and the details row. kPluggedIn means
 // external power with the battery not charging (full).
@@ -37,6 +37,7 @@ struct Status {
   int power_mw; // load in mW, shown for power diagnostics; -1 hides it
   bool rotation_locked;
   bool compact_keys; // the key layout icon is lit
+  bool mic_on;       // the mic icon shows live (red); struck through while off
   const char *message; // shown in place of the connection text when set (portrait)
 };
 
@@ -51,6 +52,8 @@ struct Controls {
   int battery;         // percent, or -1 if unknown
   const char *message; // landscape: shown in the panel while no row is open
   uint8_t arrows;      // landscape: arrow keys held, lit on the panel's arrow pad
+  bool mic_on;
+  int mic_boost; // 0 none, 1 +6 dB, 2 +12 dB
 };
 
 bool begin(Orientation orientation, bool compact_keys);
@@ -87,7 +90,8 @@ void show_log(const logcap::Line *lines, int count);
 
 // Touch targets in the status bar and slider row. For kSlider, `value` receives the slider
 // level under the touch (volume 0..10 or brightness kBrightnessMin..kBrightnessMax, depending
-// on which row is open); for kOutputToggle, 0 for the speaker half, 1 for headphones.
+// on which row is open); for kOutputToggle, 0 for the speaker half, 1 for
+// headphones; for kMicToggle, 0 for off, 1 for on; for kMicBoost, 0 none, 1 +6 dB, 2 +12 dB.
 enum class Hit : uint8_t {
   kNone,
   kVolumeIcon,
@@ -95,6 +99,9 @@ enum class Hit : uint8_t {
   kRotationIcon,
   kPowerIcon,
   kKeysIcon,
+  kMicIcon,
+  kMicToggle, // value: 0 off, 1 on
+  kMicBoost,  // value: 0..2
   kOutputToggle,
   kSlider,
 };
