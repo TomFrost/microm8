@@ -152,11 +152,17 @@ USB.
 **Working on the Tab5:** the M8 connects over high-speed USB, and its screen, keys, and audio
 through the speaker and headphones all work, as does recording from the Tab5's mics.
 
-### Roadmap
+### Shelved ideas
 
-- **USB MIDI keyboard on USB-C:** run the P4's second USB controller as a host and forward a
-  keyboard's MIDI to the M8's USB MIDI input. Open question: whether USB-C can supply 5 V to
-  a bus-powered keyboard.
+- **USB MIDI devices on USB-C:** the P4's second (full-speed) USB controller could host a MIDI
+  keyboard or a DIN-MIDI cable on the Tab5's USB-C port and forward to the M8's USB MIDI.
+  Shelved because USB-C can't power them: it's the charger's input, so nothing on the Tab5
+  supplies 5 V there, and feeding it from the Tab5's own 5 V would just charge the battery from
+  itself. A hub on USB-A doesn't work either: ESP-IDF's USB host can't run a full-speed device
+  through a high-speed hub (no transaction translator support) alongside the high-speed M8.
+- **USB passthrough to a computer:** the same controller as a USB device on USB-C, so m8c or
+  m8.run could use the M8 through the Tab5. Full speed has room for the M8's audio, but the
+  port would lose the flashing and log console while in use.
 
 ## Troubleshooting
 
@@ -198,5 +204,5 @@ JC4827W543 code remains in the git history: commit `0821825` is the last version
 
 ## License
 
-Portions are derived from m8c, the SLIP decoder and M5Unified (all MIT). See
-[LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md).
+MIT; see [LICENSE](LICENSE). Portions are derived from m8c, the SLIP decoder and M5Unified
+(all MIT); see [LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md).
