@@ -219,7 +219,9 @@ USB.
 ## Status
 
 **Working on the Tab5:** the M8 connects over high-speed USB, and its screen, keys, and audio
-through the speaker and headphones all work, as does recording from the Tab5's mics.
+through the speaker and headphones all work, as does recording from the Tab5's mics. Passed
+through to a computer on USB-C, m8.run gets the M8's screen, keys and audio while a DAW plays
+from its USB MIDI, with the Tab5 running alongside.
 
 ### Shelved ideas
 
