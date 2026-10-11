@@ -12,8 +12,8 @@ The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimpleme
 ESP32.
 
 <p>
-<img src="docs/screenshot-landscape.png" width="560" alt="Landscape: the M8's song view at 3x in the middle, status icons and an arrow pad on the left, a key layout icon and the OPTION, EDIT and PLAY triangle on the right, SHIFT in both bottom corners">
-<img src="docs/screenshot-portrait.png" width="177" alt="Portrait: the M8's song view across the top, the status bar under it, and the compact keys: an arrow pad and the OPTION, EDIT and PLAY triangle, with SHIFT in both bottom corners">
+<img src="docs/screenshot-landscape-compact.png" width="560" alt="Landscape with compact keys: the M8's song view at 3x in the middle; status icons, the arrow pad, and OPTION and SHIFT in the bottom corner on the left; the power, key layout and HOLD icons over a 2x2 grid of OPTION, EDIT, SHIFT and PLAY on the right">
+<img src="docs/screenshot-portrait-compact.png" width="177" alt="Portrait with compact keys: the M8's song view across the top, the status bar under it, then the arrow pad beside a 2x2 grid of OPTION, EDIT, SHIFT and PLAY">
 </p>
 
 *Landscape and portrait, with compact keys. Screenshots from the device (see
@@ -26,8 +26,6 @@ locks it; tap it again to unlock. The lock and the last orientation are saved.
 
 The M8's 320×240 screen is scaled with pixel-area resampling. Each display pixel averages the
 M8 pixels it covers, so text stays sharp at non-integer scales.
-
-<img src="docs/screenshot-portrait-keypad.png" width="200" align="right" alt="Portrait with the M8 key layout: the M8's song view at the top, the status bar, then OPTION and EDIT over the cursor keys, with SHIFT and PLAY under DOWN and RIGHT">
 
 **Portrait** (720×1280):
 
@@ -61,6 +59,13 @@ PLAY, drawn as symbols (⌥, a pencil, ⇧, ▶).
 
 Keys are drawn in the M8's cyan (dimmed); while held, they turn white and their touch area is
 outlined.
+
+<p>
+<img src="docs/screenshot-landscape-normal.png" width="560" alt="Landscape with the normal keys: the arrow pad, then OPTION over SHIFT on the left; EDIT, OPTION, PLAY and SHIFT stacked up from the bottom on the right">
+<img src="docs/screenshot-portrait-normal.png" width="177" alt="Portrait with the M8 key layout: OPTION and EDIT over the cursor keys, with SHIFT and PLAY under DOWN and RIGHT">
+</p>
+
+*The normal keys (compact keys off), landscape and portrait.*
 
 To turn portrait upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`. If tilting
 picks the wrong orientation, the `TAB5_GRAVITY_*` settings in `src/config.h` map the
