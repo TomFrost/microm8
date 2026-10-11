@@ -8,6 +8,9 @@ plays its audio through the speaker or headphone jack, and sends key presses fro
 on-screen multi-touch keypad. It works in portrait, with the M8's own key layout, and in
 landscape, with a bigger M8 screen and keys at the sides.
 
+Plugged into a computer while the M8 is connected, the Tab5's USB-C port passes the M8 through,
+so m8c or [m8.run](https://m8.run) can use it too (see [Using a computer](#using-a-computer)).
+
 The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimplemented for the
 ESP32.
 
@@ -123,12 +126,38 @@ The mics arrive as stereo (left and right mic), streamed to the M8's USB audio i
 M8's own clock rate (from its feedback endpoint), so recordings don't crackle. Use headphones,
 or turn the M8's input monitoring down, if the speaker feeds back into the mics.
 
+## Using a computer
+
+While the M8 is connected, the Tab5's USB-C port presents it to a computer as if it were
+plugged in directly: same name, same USB IDs, the same serial port, and its audio as a
+44.1 kHz stereo input called "M8". m8c, [m8.run](https://m8.run) and other M8 tools find it
+as usual, and a DAW can record it and use its USB MIDI. The Tab5 keeps showing the M8 and
+playing its audio throughout.
+
+- **Keys** pressed on the computer and on the Tab5 combine: hold SHIFT on the touchscreen and
+  press an arrow key on the computer, or the other way round.
+- **Closing m8c or m8.run** doesn't stop the M8's screen on the Tab5: their "disconnect"
+  command isn't passed on.
+- **Not passed through:** the M8's audio input (sending audio from the computer into the M8's
+  sample recorder). The Tab5's USB-C controller runs out of endpoints for it. Record into the
+  M8 from the Tab5's mics instead (see Recording).
+- **The link is full speed** (12 Mbit/s), which carries the M8's screen, stereo audio and MIDI
+  with room to spare.
+
+With no M8 connected, USB-C is the P4's own USB serial port, for flashing, logs and
+screenshots. With the M8 connected, `python3 tools/passthru.py serial` (needs
+`brew install libusb`) gives USB-C back to the serial port until the M8 reconnects or the Tab5
+restarts, so you can flash, watch the log or take a screenshot; flashing restarts the Tab5, which
+then passes the M8 through again. `python3 tools/passthru.py stats 10` prints the passthrough's
+audio counters. To keep USB-C as the serial port at all times, set `MICROM8_USB_PASSTHROUGH` to
+0 in `src/config.h`.
+
 ## Hardware setup
 
 - **M8:** connect the Teensy 4.1's micro-USB to the Tab5's **USB-A** port with a data cable.
   The Tab5 supplies 5 V on that port, so the Teensy needs no other power.
-- **USB-C:** charging, flashing and serial logs. It's a separate USB controller from the M8's
-  port, so logs work while the M8 is connected.
+- **USB-C:** charging, and either the M8 passed through to a computer (while the M8 is
+  connected) or flashing and serial logs (while it isn't). See [Using a computer](#using-a-computer).
 - **Battery:** the Tab5's NP-F550 pack powers everything.
 
 ## Building and flashing
@@ -141,6 +170,9 @@ isochronous transfers, which USB audio needs.
 ```bash
 pio run -t upload -t monitor
 ```
+
+While the M8 is connected, USB-C is the M8 passed through rather than the Tab5's serial port:
+run `python3 tools/passthru.py serial` first, or unplug the M8.
 
 The first build takes several minutes: `custom_sdkconfig` makes pioarduino rebuild the Arduino
 core from ESP-IDF source (see [Troubleshooting](#troubleshooting)). Later builds take seconds.
@@ -158,7 +190,8 @@ pio test -e native
 `tools/screenshot.py` saves exactly what's on the screen as a PNG, over the USB-C serial port
 (it sends `S`; the firmware replies with its framebuffer, see `src/diag/screenshot.cpp`). It
 needs only Python 3, on macOS or Linux. Close any serial monitor first, since the port can't be
-shared:
+shared. While the M8 is connected, run `python3 tools/passthru.py serial` first to get the serial
+port back:
 
 ```bash
 python3 tools/screenshot.py landscape.png
@@ -168,7 +201,8 @@ python3 tools/screenshot.py landscape.png
 
 | Module | Role |
 |---|---|
-| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight. While the mic is on, streams to the M8's audio input, sizing each packet from the M8's rate feedback. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
+| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight, and forwards the M8's USB MIDI for passthrough. While the mic is on, streams to the M8's audio input, sizing each packet from the M8's rate feedback. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
+| `src/usb/passthru.cpp` | USB passthrough on USB-C. While an M8 is connected, swaps the P4's two full-speed PHYs so its OTG 1.1 controller drives USB-C (the Serial/JTAG controller moves to the PHY on the I2S pins, with its pads off), then runs a TinyUSB device with the M8's identity: one class driver owns the whole configuration (CDC serial, UAC2 audio to the computer, USB MIDI), numbered as on the M8 except audio, which moves to endpoint 0x81 (the controller has TX FIFOs for IN endpoints 1-4 only). Vendor requests read audio counters and hand USB-C back to Serial/JTAG (`tools/passthru.py`). Copies of the M8's serial, audio and MIDI go to the computer; the computer's commands go to the M8, with its key state merged into the touch keys and its disconnect command dropped. Audio packets are queued from the USB interrupt, 44 or 45 frames per 1 ms, adjusted to keep about 10 ms buffered. |
 | `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. Ported from m8c. |
 | `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
 | `src/display/ui.cpp` | Portrait and landscape layouts. Changed areas of the M8 screen are scaled (pixel-area resampling) in the panel's native orientation into internal RAM, then copied into the panel's framebuffer by the DSI driver's 2D DMA, timed against the panel's scan so updates don't tear. Keys, status icons, the volume/brightness/power row and the landscape arrow pad are drawn through M5GFX. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
@@ -178,7 +212,7 @@ python3 tools/screenshot.py landscape.png
 | `src/audio/mic.cpp` | Mic capture: reads the mics into a buffer that the USB task drains at the M8's rate, dropping or repeating single frames to absorb clock drift. Optional digital boost. |
 | `src/board.cpp` | M5Unified bring-up, USB-A 5 V, and the lock for the shared internal I2C bus. Switches off hardware microm8 doesn't use (the ESP32-C6 wireless chip and the camera). Battery state from the INA226 current sensor: charging, plugged in, or no battery. |
 
-FreeRTOS tasks: USB and audio run on core 0; display and touch run on core 1. Serial data
+FreeRTOS tasks: USB (host and passthrough) and audio run on core 0; display and touch run on core 1. Serial data
 passes from USB to the UI task through a stream buffer, so a slow display update never stalls
 USB.
 
@@ -195,9 +229,6 @@ through the speaker and headphones all work, as does recording from the Tab5's m
   supplies 5 V there, and feeding it from the Tab5's own 5 V would just charge the battery from
   itself. A hub on USB-A doesn't work either: ESP-IDF's USB host can't run a full-speed device
   through a high-speed hub (no transaction translator support) alongside the high-speed M8.
-- **USB passthrough to a computer:** the same controller as a USB device on USB-C, so m8c or
-  m8.run could use the M8 through the Tab5. Full speed has room for the M8's audio, but the
-  port would lose the flashing and log console while in use.
 
 ## Troubleshooting
 

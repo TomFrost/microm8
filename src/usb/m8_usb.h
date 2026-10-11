@@ -26,6 +26,13 @@ using AudioSink = void (*)(const uint8_t *pcm, size_t bytes);
 // Called from the USB task to fill `frames` stereo frames of audio for the M8's USB input.
 using AudioSource = void (*)(int16_t *stereo, int frames);
 
+// Called from the USB task with bytes the M8 sends on its serial port or its USB MIDI.
+using DataSink = void (*)(const uint8_t *data, size_t bytes);
+
+// Copies of the M8's serial (display protocol) and MIDI data, for USB passthrough. Call
+// before start(); either may be null.
+void set_taps(DataSink serial, DataSink midi);
+
 // Installs the USB host stack and starts its tasks. Serial bytes from the M8 are written to
 // `rx` (single reader). `audio` and `input` may be null.
 bool start(StreamBufferHandle_t rx, AudioSink audio, AudioSource input);
@@ -62,5 +69,16 @@ InputStats input_stats_snapshot();
 
 // Queues bytes for the M8's CDC OUT endpoint. Thread-safe. len <= 8.
 bool send(const uint8_t *data, size_t len);
+
+// Queues USB-MIDI event packets for the M8's MIDI OUT endpoint. Thread-safe. len <= 64.
+bool send_midi(const uint8_t *data, size_t len);
+
+// The connected M8's USB identity, so passthrough can present the same device to a computer.
+// Valid while state() is kConnected; strings are ASCII and may be empty.
+struct Identity {
+  uint16_t vid, pid, bcd_device;
+  char manufacturer[32], product[32], serial[32];
+};
+Identity identity();
 
 } // namespace m8usb

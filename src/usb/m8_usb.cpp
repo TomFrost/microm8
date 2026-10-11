@@ -26,6 +26,7 @@ constexpr uint8_t kClassAudio = 0x01;
 constexpr uint8_t kClassCdcComm = 0x02;
 constexpr uint8_t kClassCdcData = 0x0A;
 constexpr uint8_t kSubclassAudioStreaming = 0x02;
+constexpr uint8_t kSubclassMidiStreaming = 0x03;
 
 constexpr uint8_t kCdcSetLineCoding = 0x20;
 constexpr uint8_t kCdcSetControlLineState = 0x22;
@@ -49,6 +50,9 @@ constexpr uint32_t kFeedbackMin = kFeedbackNominal * 98 / 100;
 constexpr uint32_t kFeedbackMax = kFeedbackNominal * 102 / 100;
 constexpr int kOutMicroframesPerPacket = 2; // bInterval 2
 constexpr int kOutMaxLen = 8;
+// USB MIDI, forwarded for passthrough: event packets in 64-byte transfers.
+constexpr int kMidiInTransfers = 2;
+constexpr int kMidiMaxLen = 64;
 
 // If no device has enumerated for this long, power-cycle the root port: the host-side
 // equivalent of replugging, in case a device that attached during boot was missed.
@@ -57,6 +61,11 @@ constexpr TickType_t kPortRetryInterval = pdMS_TO_TICKS(5000);
 struct OutMsg {
   uint8_t len;
   uint8_t data[kOutMaxLen];
+};
+
+struct MidiMsg {
+  uint8_t len;
+  uint8_t data[kMidiMaxLen];
 };
 
 struct Endpoints {
@@ -77,6 +86,10 @@ struct Endpoints {
   uint16_t iso_out_mps = 0;
   uint8_t feedback_in = 0;
   uint16_t feedback_mps = 0;
+
+  int midi_iface = -1;
+  uint8_t midi_in = 0, midi_out = 0;
+  uint16_t midi_in_mps = 64;
 };
 
 usb_host_client_handle_t client;
@@ -86,11 +99,15 @@ Endpoints eps;
 StreamBufferHandle_t rx_stream;
 AudioSink audio_sink;
 AudioSource audio_source;
+DataSink serial_tap;
+DataSink midi_tap;
+Identity ident;
 volatile bool want_input; // set from any task
 bool input_on;            // client task only
 uint32_t feedback = kFeedbackNominal;
 uint32_t out_acc;         // fractional samples carried between packets, 16.16
 QueueHandle_t out_queue;
+QueueHandle_t midi_queue;
 
 volatile State cur_state = State::kWaiting;
 volatile uint32_t connections;
@@ -107,10 +124,13 @@ usb_transfer_t *iso_xfer[kIsoTransfers];
 usb_transfer_t *iso_out_xfer[kIsoOutTransfers];
 usb_transfer_t *feedback_xfer[kFeedbackTransfers];
 int input_inflight; // of the transfers above
+usb_transfer_t *midi_in_xfer[kMidiInTransfers];
 usb_transfer_t *out_xfer;
+usb_transfer_t *midi_out_xfer;
 usb_transfer_t *ctrl_xfer;
 int inflight;
 bool out_busy;
+bool midi_out_busy;
 bool tearing_down;
 uint32_t rx_dropped;
 AudioStats iso_stats; // written by the client task, read elsewhere as a snapshot
@@ -159,6 +179,7 @@ void bulk_in_cb(usb_transfer_t *t) {
     if (t->actual_num_bytes > 0) {
       const size_t sent = xStreamBufferSend(rx_stream, t->data_buffer, t->actual_num_bytes, 0);
       if (sent < (size_t)t->actual_num_bytes) rx_dropped += t->actual_num_bytes - sent;
+      if (serial_tap) serial_tap(t->data_buffer, t->actual_num_bytes);
     }
     resubmit(t);
   } else if (t->status != USB_TRANSFER_STATUS_NO_DEVICE &&
@@ -300,10 +321,28 @@ void feedback_cb(usb_transfer_t *t) {
   submit_input(t);
 }
 
+void midi_in_cb(usb_transfer_t *t) {
+  inflight--;
+  if (t->status == USB_TRANSFER_STATUS_COMPLETED) {
+    if (t->actual_num_bytes > 0 && midi_tap) midi_tap(t->data_buffer, t->actual_num_bytes);
+    resubmit(t);
+  } else if (t->status != USB_TRANSFER_STATUS_NO_DEVICE &&
+             t->status != USB_TRANSFER_STATUS_CANCELED) {
+    ESP_LOGW(TAG, "MIDI IN status %d", t->status);
+    resubmit(t);
+  }
+}
+
 void out_cb(usb_transfer_t *t) {
   inflight--;
   out_busy = false;
   if (t->status != USB_TRANSFER_STATUS_COMPLETED) ESP_LOGW(TAG, "bulk OUT status %d", t->status);
+}
+
+void midi_out_cb(usb_transfer_t *t) {
+  inflight--;
+  midi_out_busy = false;
+  if (t->status != USB_TRANSFER_STATUS_COMPLETED) ESP_LOGW(TAG, "MIDI OUT status %d", t->status);
 }
 
 volatile bool ctrl_done;
@@ -435,6 +474,17 @@ void parse_config(const usb_config_desc_t *cfg) {
       } else if (!in && !eps.bulk_out) {
         eps.bulk_out = ep->bEndpointAddress;
         eps.bulk_out_mps = mps;
+      }
+    } else if (intf->bInterfaceClass == kClassAudio &&
+               intf->bInterfaceSubClass == kSubclassMidiStreaming &&
+               type == USB_BM_ATTRIBUTES_XFER_BULK) {
+      if (eps.midi_iface < 0) eps.midi_iface = intf->bInterfaceNumber;
+      if (intf->bInterfaceNumber != eps.midi_iface) continue;
+      if (in && !eps.midi_in) {
+        eps.midi_in = ep->bEndpointAddress;
+        eps.midi_in_mps = mps;
+      } else if (!in && !eps.midi_out) {
+        eps.midi_out = ep->bEndpointAddress;
       }
     } else if (intf->bInterfaceClass == kClassAudio &&
                intf->bInterfaceSubClass == kSubclassAudioStreaming &&
@@ -677,7 +727,7 @@ void release_all() {
   const bool had_input = input_on;
   input_on = false;
   const uint8_t endpoints[] = {eps.bulk_in, eps.bulk_out, eps.iso_in, eps.iso_out,
-                               eps.feedback_in};
+                               eps.feedback_in, eps.midi_in, eps.midi_out};
   cancel_endpoints(endpoints, sizeof(endpoints));
 
   // Let cancelled/failed transfers drain back through their callbacks.
@@ -691,6 +741,7 @@ void release_all() {
   if (had_input) usb_host_interface_release(client, dev, eps.input_iface);
 
   if (eps.audio_iface >= 0) usb_host_interface_release(client, dev, eps.audio_iface);
+  if (eps.midi_iface >= 0) usb_host_interface_release(client, dev, eps.midi_iface);
   if (eps.data_iface >= 0) usb_host_interface_release(client, dev, eps.data_iface);
   if (eps.comm_iface >= 0) usb_host_interface_release(client, dev, eps.comm_iface);
   usb_host_device_close(client, dev);
@@ -700,9 +751,45 @@ void release_all() {
   inflight = 0;
   input_inflight = 0;
   out_busy = false;
+  midi_out_busy = false;
   audio_on = false;
   tearing_down = false;
   xQueueReset(out_queue);
+  xQueueReset(midi_queue);
+}
+
+// ASCII copy of a UTF-16LE string descriptor (non-ASCII characters become '?').
+void copy_string(char *out, size_t size, const usb_str_desc_t *desc) {
+  size_t n = 0;
+  if (desc && desc->bLength >= 2) {
+    const int chars = (desc->bLength - 2) / 2;
+    for (int i = 0; i < chars && n + 1 < size; i++) {
+      const uint16_t c = desc->wData[i];
+      out[n++] = c >= 0x20 && c < 0x7F ? (char)c : '?';
+    }
+  }
+  out[n] = '\0';
+}
+
+// Claims the M8's USB MIDI interface and starts reading it, for passthrough. Optional: the M8
+// works without it.
+void start_midi() {
+  if (eps.midi_iface < 0 || !eps.midi_in || !eps.midi_out) return;
+  if (usb_host_interface_claim(client, dev, eps.midi_iface, 0) != ESP_OK) {
+    ESP_LOGW(TAG, "claim MIDI iface %d failed", eps.midi_iface);
+    eps.midi_iface = -1;
+    return;
+  }
+  for (int i = 0; i < kMidiInTransfers; i++) {
+    usb_transfer_t *t = midi_in_xfer[i];
+    t->device_handle = dev;
+    t->bEndpointAddress = eps.midi_in;
+    t->callback = midi_in_cb;
+    t->num_bytes = usb_round_up_to_mps(kMidiMaxLen, eps.midi_in_mps);
+    if (usb_host_transfer_submit(t) == ESP_OK) inflight++;
+  }
+  ESP_LOGI(TAG, "MIDI: iface %d (IN 0x%02X, OUT 0x%02X)", eps.midi_iface, eps.midi_in,
+           eps.midi_out);
 }
 
 void open_device(uint8_t addr) {
@@ -779,6 +866,18 @@ void open_device(uint8_t addr) {
   }
 
   audio_on = start_audio();
+  start_midi();
+
+  ident.vid = dd->idVendor;
+  ident.pid = dd->idProduct;
+  ident.bcd_device = dd->bcdDevice;
+  usb_device_info_t info = {};
+  usb_host_device_info(dev, &info);
+  copy_string(ident.manufacturer, sizeof(ident.manufacturer), info.str_desc_manufacturer);
+  copy_string(ident.product, sizeof(ident.product), info.str_desc_product);
+  copy_string(ident.serial, sizeof(ident.serial), info.str_desc_serial_num);
+  ESP_LOGI(TAG, "M8 identity: \"%s\" \"%s\" serial \"%s\"", ident.manufacturer, ident.product,
+           ident.serial);
 
   ESP_LOGI(TAG, "M8 connected: CDC iface %d (IN 0x%02X, OUT 0x%02X)", eps.data_iface, eps.bulk_in,
            eps.bulk_out);
@@ -805,6 +904,24 @@ void pump_out_queue() {
   }
 }
 
+void pump_midi_queue() {
+  if (!dev || midi_out_busy || tearing_down || eps.midi_iface < 0) return;
+  MidiMsg msg;
+  if (xQueueReceive(midi_queue, &msg, 0) != pdTRUE) return;
+
+  memcpy(midi_out_xfer->data_buffer, msg.data, msg.len);
+  midi_out_xfer->num_bytes = msg.len;
+  midi_out_xfer->device_handle = dev;
+  midi_out_xfer->bEndpointAddress = eps.midi_out;
+  midi_out_xfer->callback = midi_out_cb;
+  if (usb_host_transfer_submit(midi_out_xfer) == ESP_OK) {
+    inflight++;
+    midi_out_busy = true;
+  } else {
+    ESP_LOGW(TAG, "MIDI OUT submit failed");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
@@ -828,7 +945,12 @@ void client_task(void *) {
   for (int i = 0; i < kBulkInTransfers; i++) {
     ESP_ERROR_CHECK(usb_host_transfer_alloc(kBulkInSize, 0, &bulk_in_xfer[i]));
   }
+  for (int i = 0; i < kMidiInTransfers; i++) {
+    // Room for a high-speed bulk packet, in case the M8 reports a 512-byte MPS.
+    ESP_ERROR_CHECK(usb_host_transfer_alloc(512, 0, &midi_in_xfer[i]));
+  }
   ESP_ERROR_CHECK(usb_host_transfer_alloc(64, 0, &out_xfer));
+  ESP_ERROR_CHECK(usb_host_transfer_alloc(kMidiMaxLen, 0, &midi_out_xfer));
   ESP_ERROR_CHECK(usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + 64, 0, &ctrl_xfer));
 
   for (;;) {
@@ -848,6 +970,7 @@ void client_task(void *) {
       open_device(addr);
     }
     pump_out_queue();
+    pump_midi_queue();
 
     // Audio to the M8's input follows the mic switch.
     if (cur_state == State::kConnected && want_input != input_on) {
@@ -867,6 +990,7 @@ bool start(StreamBufferHandle_t rx, AudioSink audio, AudioSource input) {
   audio_sink = audio;
   audio_source = input;
   out_queue = xQueueCreate(32, sizeof(OutMsg));
+  midi_queue = xQueueCreate(8, sizeof(MidiMsg));
 
   usb_host_config_t host_cfg = {};
   host_cfg.skip_phy_setup = false;
@@ -904,5 +1028,22 @@ bool send(const uint8_t *data, size_t len) {
   if (client) usb_host_client_unblock(client);
   return true;
 }
+
+bool send_midi(const uint8_t *data, size_t len) {
+  if (len == 0 || len > kMidiMaxLen || cur_state != State::kConnected) return false;
+  MidiMsg msg;
+  msg.len = (uint8_t)len;
+  memcpy(msg.data, data, len);
+  if (xQueueSend(midi_queue, &msg, 0) != pdTRUE) return false;
+  if (client) usb_host_client_unblock(client);
+  return true;
+}
+
+void set_taps(DataSink serial, DataSink midi) {
+  serial_tap = serial;
+  midi_tap = midi;
+}
+
+Identity identity() { return ident; }
 
 } // namespace m8usb

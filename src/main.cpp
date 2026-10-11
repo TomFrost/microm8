@@ -5,6 +5,7 @@
 //   audio            (core 0)  ring buffer -> board audio hardware           -> audio/audio_out.cpp
 //   ui               (core 1)  SLIP decode, M8 framebuffer, LCD updates      -> this file
 //   touch            (core 1)  multi-touch -> M8 key bitmask                 -> this file
+//   passthru         (core 0)  USB-C: the M8, passed through to a computer   -> usb/passthru.cpp
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -26,6 +27,7 @@
 #include "m8/protocol.h"
 #include "m8/screen.h"
 #include "usb/m8_usb.h"
+#include "usb/passthru.h"
 
 static const char *TAG = "microm8";
 
@@ -597,7 +599,8 @@ void touch_task(void *) {
       sent_mask = 0;
     }
 
-    const uint8_t out = repeat_arrows(mask, millis());
+    // Keys held from a computer through USB passthrough count as held here too.
+    const uint8_t out = repeat_arrows(mask, millis()) | passthru::remote_keys();
     if (out != sent_mask && m8usb::state() == m8usb::State::kConnected) {
       const uint8_t msg[2] = {m8proto::kCmdController, out};
       if (m8usb::send(msg, sizeof(msg))) sent_mask = out; // retried next poll if the queue is full
@@ -607,7 +610,10 @@ void touch_task(void *) {
   }
 }
 
-void audio_sink(const uint8_t *pcm, size_t bytes) { audio::push(pcm, bytes); }
+void audio_sink(const uint8_t *pcm, size_t bytes) {
+  audio::push(pcm, bytes);
+  if (MICROM8_USB_PASSTHROUGH) passthru::push_audio(pcm, bytes);
+}
 
 } // namespace
 
@@ -647,7 +653,11 @@ void setup() {
   if (!mic::start(prefs.getUChar("mic_boost", 0))) ESP_LOGE(TAG, "mic init failed");
 
   rx_stream = xStreamBufferCreate(kRxStreamBytes, 1);
+  if (MICROM8_USB_PASSTHROUGH) m8usb::set_taps(passthru::push_serial, passthru::push_midi);
   if (!m8usb::start(rx_stream, audio_sink, mic::pull)) ESP_LOGE(TAG, "USB host init failed");
+  // After audio::start(): routing the I2S pins (GPIO 26/27) turns off the OTG pads passthrough
+  // turns on.
+  if (MICROM8_USB_PASSTHROUGH && !passthru::start()) ESP_LOGE(TAG, "passthrough init failed");
 
   xTaskCreatePinnedToCore(ui_task, "ui", 8192, nullptr, 10, nullptr, UI_CORE);
   if (touch_ok) xTaskCreatePinnedToCore(touch_task, "touch", 4096, nullptr, 12, nullptr, UI_CORE);

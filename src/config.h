@@ -104,6 +104,13 @@
 #define MICROM8_POWER_DIAG 0
 #endif
 
+// USB passthrough: while an M8 is connected, USB-C presents it to a computer, for m8c or m8.run
+// (see usb/passthru.h). USB-C is the Serial/JTAG port (flashing, logs, screenshots) only while
+// no M8 is connected. 0 keeps USB-C as Serial/JTAG at all times.
+#ifndef MICROM8_USB_PASSTHROUGH
+#define MICROM8_USB_PASSTHROUGH 1
+#endif
+
 // HP_DET reads 1 with headphones plugged in (confirmed on hardware). Plugging in switches to
 // headphones and unplugging back to the speaker. -1 disables automatic switching.
 #ifndef TAB5_HP_DET_INSERTED_LEVEL
