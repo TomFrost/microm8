@@ -11,7 +11,7 @@
 
 namespace keypad {
 
-enum class Icon : uint8_t { kNone, kUp, kDown, kLeft, kRight, kEdit, kOption, kPlay };
+enum class Icon : uint8_t { kNone, kUp, kDown, kLeft, kRight, kEdit, kOption, kPlay, kShift };
 
 struct Key {
   const char *label;
@@ -24,14 +24,9 @@ struct Key {
 constexpr int kMaxKeys = 9;
 constexpr int kInset = 3; // drawn keys are inset by this much from their drawn rect
 
-// Pads. Lines from the centre split the touch area into one wedge per key:
-// - kArrows: UP, DOWN, LEFT and RIGHT in a diamond, split by the diagonals;
-// - kTriangle: OPTION and EDIT above PLAY, in three 120-degree wedges (split straight up, and
-//   30 degrees below horizontal on either side).
-enum class PadKind : uint8_t { kArrows, kTriangle };
-
+// The arrow pad: UP, DOWN, LEFT and RIGHT in a diamond. The diagonals through its centre split
+// the touch area into one wedge per arrow.
 struct Pad {
-  PadKind kind;
   int16_t cx, cy;      // centre
   int16_t half;        // half-size of the square the pressed key's wedge is outlined in
   int16_t icon_offset; // icon centres from the centre
@@ -41,8 +36,8 @@ struct Pad {
 };
 
 // Portrait: the M8's own layout. Landscape: keys in the side margins, SHIFT on both sides, and
-// an arrow pad (plus swipes). Compact: an arrow pad and an OPTION/EDIT/PLAY triangle, one for
-// each thumb, with SHIFT under both.
+// an arrow pad (plus swipes). Compact: the arrow pad for the left thumb and the M8's
+// OPTION/EDIT/SHIFT/PLAY block for the right, with OPTION and SHIFT under the left thumb too.
 enum class Arrangement : uint8_t { kPortrait, kLandscape };
 
 // Switches the active layout (from the UI task; the touch task picks it up atomically).
@@ -65,7 +60,7 @@ uint8_t mask_for(const touch::Point *points, int count);
 // The key under (x, y) in a pad's touch area, or 0 outside it.
 uint8_t pad_key(const Pad &pad, int x, int y);
 
-// All the keys on a pad.
+// All the keys on a pad (the arrows).
 uint8_t pad_keys(const Pad &pad);
 
 } // namespace keypad

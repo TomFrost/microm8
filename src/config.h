@@ -40,12 +40,13 @@
 #define LAND_M8_Y 0
 #define LAND_M8_W 960
 #define LAND_M8_H 720
-#define LAND_ROW_Y 300 // the panel in the left margin, between the icons and SHIFT
-#define LAND_ROW_H 236
+#define LAND_ROW_Y 300 // the panel in the left margin, between the icons and the keys below
+#define LAND_ROW_H 208
 
 // Landscape keys, in the margins either side of the M8 screen: a column of EDIT, OPTION, PLAY
-// and SHIFT up from the bottom-right corner, and SHIFT in the bottom-left corner.
-#define LKEY_SIZE 132 // the right column then starts below the power and key layout icons
+// and SHIFT up from the bottom-right corner, and OPTION over SHIFT in the bottom-left corner.
+#define LKEY_W 136
+#define LKEY_H 88 // low, so the keys are easy to reach from the bottom corners
 #define LKEY_GAP 12
 #define LKEY_MARGIN 12
 

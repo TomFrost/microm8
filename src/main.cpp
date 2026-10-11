@@ -58,6 +58,7 @@ std::atomic<uint32_t> popup_touched_at{0};
 std::atomic<int> brightness{ui::kBrightnessMax};
 std::atomic<bool> rotation_locked{false};
 std::atomic<bool> compact_keys{false};
+std::atomic<bool> hold_mode{false}; // HOLD: SHIFT and OPTION stay down (see apply_hold)
 std::atomic<uint32_t> message_at{0}; // when the rotation lock was last toggled
 
 constexpr uint8_t kArrowKeys = m8proto::kKeyUp | m8proto::kKeyDown | m8proto::kKeyLeft |
@@ -72,6 +73,7 @@ void save_settings() {
   prefs.putUChar("bright", (uint8_t)brightness.load());
   prefs.putUChar("rot_lock", rotation_locked ? 1 : 0);
   prefs.putUChar("compact", compact_keys ? 1 : 0);
+  prefs.putUChar("hold", hold_mode ? 1 : 0);
   prefs.putUChar("mic_boost", (uint8_t)mic::boost());
   prefs.putUChar("orient", (uint8_t)ui::orientation());
 }
@@ -319,6 +321,7 @@ void ui_task(void *) {
       st.power_mw = MICROM8_POWER_DIAG ? board::power_draw_mw() : -1;
       st.rotation_locked = rotation_locked;
       st.compact_keys = applied_compact;
+      st.hold = hold_mode;
       st.mic_on = mic::enabled();
       const uint32_t message_since = message_at;
       if (message_since && (int32_t)(now - message_since) < (int32_t)kMessageMs) {
@@ -409,6 +412,10 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
   case ui::Hit::kPowerIcon:
     popup = open == ui::Popup::kPower ? ui::Popup::kNone : ui::Popup::kPower;
     break;
+  case ui::Hit::kHoldIcon:
+    hold_mode = !hold_mode;
+    settings_changed = true;
+    break;
   case ui::Hit::kKeysIcon:
     compact_keys = !compact_keys;
     settings_changed = true;
@@ -456,6 +463,25 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
 
 // Turns held arrows into taps at microm8's repeat rate (see ARROW_REPEAT_MS in config.h).
 // `mask` is the keys held on screen; returns what the M8 should see.
+// HOLD, for playing chords one key at a time (with one hand, or one finger). With HOLD on,
+// tapping SHIFT or OPTION holds it down until it's tapped again, whatever else is pressed in
+// between: SHIFT, then RIGHT, RIGHT, RIGHT, then SHIFT again. HOLD itself stays on until its
+// icon is tapped. `keys`: the keys under fingers. Returns what the M8 should be sent, which is
+// also what to light on screen.
+constexpr uint8_t kLatchable = m8proto::kKeySelect | m8proto::kKeyOpt;
+
+uint8_t apply_hold(uint8_t keys, bool on) {
+  static uint8_t prev, latched;
+  if (!on) {
+    prev = keys;
+    latched = 0;
+    return keys;
+  }
+  latched ^= keys & ~prev & kLatchable; // a tap toggles
+  prev = keys;
+  return (keys & ~kLatchable) | latched;
+}
+
 uint8_t repeat_arrows(uint8_t mask, uint32_t now) {
 #if ARROW_REPEAT_MS == 0
   (void)now;
@@ -560,7 +586,7 @@ void touch_task(void *) {
       }
       if (flicked && (int32_t)(now - flicked_until) >= 0) flicked = 0;
 
-      mask = keypad::mask_for(key_points, key_count) | pad_keys | flicked;
+      mask = apply_hold(keypad::mask_for(key_points, key_count) | pad_keys | flicked, hold_mode);
       held_keys = mask;
     }
 
@@ -603,6 +629,7 @@ void setup() {
                    : saved_brightness;
   rotation_locked = prefs.getUChar("rot_lock", 0) != 0;
   compact_keys = prefs.getUChar("compact", 0) != 0;
+  hold_mode = prefs.getUChar("hold", 0) != 0;
   const int saved_orientation = prefs.getUChar("orient", 0);
   const auto orientation = saved_orientation <= (int)ui::Orientation::kLandscapeFlipped
                                ? (ui::Orientation)saved_orientation

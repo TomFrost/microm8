@@ -26,18 +26,12 @@ uint8_t mask_for(const touch::Point *points, int count) {
 uint8_t pad_key(const Pad &p, int x, int y) {
   if (x < p.x || x >= p.x + p.w || y < p.y || y >= p.y + p.h) return 0;
   const int dx = x - p.cx, dy = y - p.cy;
-  if (p.kind == PadKind::kArrows) {
-    if (abs(dx) > abs(dy)) return dx > 0 ? m8proto::kKeyRight : m8proto::kKeyLeft;
-    return dy > 0 ? m8proto::kKeyDown : m8proto::kKeyUp;
-  }
-  if (dy * 1000 > abs(dx) * 577) return m8proto::kKeyStart; // below tan(30 degrees)
-  return dx < 0 ? m8proto::kKeyOpt : m8proto::kKeyEdit;
+  if (abs(dx) > abs(dy)) return dx > 0 ? m8proto::kKeyRight : m8proto::kKeyLeft;
+  return dy > 0 ? m8proto::kKeyDown : m8proto::kKeyUp;
 }
 
-uint8_t pad_keys(const Pad &p) {
-  return p.kind == PadKind::kArrows
-             ? m8proto::kKeyUp | m8proto::kKeyDown | m8proto::kKeyLeft | m8proto::kKeyRight
-             : m8proto::kKeyOpt | m8proto::kKeyEdit | m8proto::kKeyStart;
+uint8_t pad_keys(const Pad &) {
+  return m8proto::kKeyUp | m8proto::kKeyDown | m8proto::kKeyLeft | m8proto::kKeyRight;
 }
 
 } // namespace keypad

@@ -32,8 +32,8 @@ M8 pixels it covers, so text stays sharp at non-integer scales.
 **Portrait** (720×1280):
 
 - **M8 screen at 2.25×** (720×540) across the full width at the top.
-- **Status bar:** connection and firmware version on the left; volume, brightness, rotation
-  and power icons on the right.
+- **Status bar:** connection and firmware version on the left; mic, key layout, HOLD, volume,
+  brightness, rotation and power icons on the right.
 - **The M8's own key layout** along the bottom: the cursor keys as an inverted T, SHIFT/PLAY
   directly under DOWN/RIGHT, and OPTION/EDIT up and to the right of UP, as on the hardware.
   Keys are 144 px (about 12.5 mm).
@@ -41,20 +41,26 @@ M8 pixels it covers, so text stays sharp at non-integer scales.
 **Landscape** (1280×720):
 
 - **M8 screen at 3×** (960×720), centred.
-- **Left margin:** the volume, brightness and rotation icons; under them a panel with the
-  arrow pad (or an open slider, the power details or a message); SHIFT in the bottom-left
-  corner.
-- **Right margin:** the power and key layout icons; under them EDIT, OPTION, PLAY and SHIFT,
-  stacked up from the bottom-right corner.
+- **Left margin:** the volume, brightness, rotation and mic icons; under them a panel with
+  the arrow pad (or an open slider, the power details or a message); OPTION over SHIFT in the
+  bottom-left corner.
+- **Right margin:** the power, key layout and HOLD icons; under them EDIT, OPTION, PLAY and
+  SHIFT, stacked up from the bottom-right corner. Landscape keys are low (88 px), so they're
+  easy to reach from the bottom corners.
 - No connection text, to keep the margins clear.
 
-**Compact keys** (the key layout icon toggles them, in either orientation): a pad for each
-thumb. The arrows sit in a diamond on the left; OPTION, EDIT and PLAY (⌥, a pencil, ▶) sit in a
-triangle on the right, at the same height; SHIFT stays in both bottom corners. In portrait the
-pads replace the M8 keypad; in landscape the triangle replaces the right-hand column.
+**Compact keys** (the key layout icon toggles them, in either orientation): the arrow pad for
+the left thumb, and the M8's own right-hand block for the right, OPTION and EDIT over SHIFT and
+PLAY, drawn as symbols (⌥, a pencil, ⇧, ▶).
 
-Keys are drawn as a purple label or symbol; while held, they turn white and their touch area
-is outlined.
+- **Portrait:** the arrow pad and the block, full size, centred between the status bar and
+  the bottom of the screen.
+- **Landscape:** the block is a square grid level with the arrow pad. OPTION and SHIFT appear
+  again in the bottom-left corner, so every chord has a key under each thumb: a touchscreen
+  can't press two keys under one thumb, as you would OPTION+EDIT on the hardware.
+
+Keys are drawn in the M8's cyan (dimmed); while held, they turn white and their touch area is
+outlined.
 
 To turn portrait upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`. If tilting
 picks the wrong orientation, the `TAB5_GRAVITY_*` settings in `src/config.h` map the
@@ -69,8 +75,7 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
 - **Arrows in landscape:**
   - **Arrow pad:** the four arrows in the left panel. Each arrow owns a triangle of the
     panel, cut by the diagonals of the square around the arrows, so the whole panel is
-    touchable. The compact OPTION/EDIT/PLAY triangle works the same way, in three equal
-    wedges.
+    touchable.
   - **Swipes:** swipe right, left, up or down anywhere on the left half of the screen (the M8
     screen included). Keep the finger down to hold the arrow; lifting it releases.
 - **Volume icon** (a speaker, or headphones when they're the output): opens a row with an
@@ -81,6 +86,10 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
   backlight stops dimming. Dimming also cuts power: about 0.8 W between 30% and full.
 - **Rotation icon:** locks or unlocks rotation (crossed out in red when locked).
 - **Key layout icon:** switches compact keys on or off (lit while on).
+- **HOLD icon** (an H key cap): for playing chords one key at a time, with one hand or one
+  finger. While HOLD is on (the icon fills white), tapping SHIFT or OPTION holds it down until
+  it's tapped again, whatever else you press in between: SHIFT, then RIGHT, RIGHT, RIGHT, then
+  SHIFT again. HOLD stays on until you tap its icon.
 - **Power icon:** a battery filled and coloured by charge (green when full, yellow around
   half, red when low); an empty battery with a green bolt while charging; a full battery with
   a light bolt when plugged in and full; a plug when no battery is fitted. Tap it for the
@@ -91,7 +100,7 @@ accelerometer's axes to orientations; the log's `orientation:` lines show the re
   Struck through while off, red while live.
 - Rows open under the status bar (in landscape, in the left panel) without covering the M8
   screen, and close when you tap the icon again or 4 seconds after the last touch. Volumes,
-  output, brightness and mic boost are saved to flash.
+  output, brightness, mic boost, compact keys and HOLD are saved to flash.
 
 ## Recording
 

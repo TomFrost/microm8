@@ -37,6 +37,7 @@ struct Status {
   int power_mw; // load in mW, shown for power diagnostics; -1 hides it
   bool rotation_locked;
   bool compact_keys; // the key layout icon is lit
+  bool hold;         // the HOLD icon is lit
   bool mic_on;       // the mic icon shows live (red); struck through while off
   const char *message; // shown in place of the connection text when set (portrait)
 };
@@ -105,6 +106,7 @@ enum class Hit : uint8_t {
   kPowerIcon,
   kKeysIcon,
   kMicIcon,
+  kHoldIcon,
   kMicToggle, // value: 0 off, 1 on
   kMicBoost,  // value: 0..2
   kOutputToggle,
