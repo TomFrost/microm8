@@ -27,6 +27,8 @@ locks it; tap it again to unlock. The lock and the last orientation are saved.
 The M8's 320×240 screen is scaled with pixel-area resampling. Each display pixel averages the
 M8 pixels it covers, so text stays sharp at non-integer scales.
 
+<img src="docs/screenshot-portrait-keypad.png" width="200" align="right" alt="Portrait with the M8 key layout: the M8's song view at the top, the status bar, then OPTION and EDIT over the cursor keys, with SHIFT and PLAY under DOWN and RIGHT">
+
 **Portrait** (720×1280):
 
 - **M8 screen at 2.25×** (720×540) across the full width at the top.
