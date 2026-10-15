@@ -25,17 +25,30 @@ pio test -e native           # host-side unit tests (M8 protocol parser and rend
 
 - The platform is **pioarduino**, pinned by URL in `platformio.ini`. The stock PlatformIO
   espressif32 platform won't work (its USB host stack can't do isochronous audio).
+- Build with the **pioarduino core** (PyPI package `pioarduino`, 6.2.0 or later; the pioarduino
+  IDE extension installs it at `~/.platformio/penv/bin/pio`). The upstream PlatformIO Core
+  pins different build tools (SCons) in the shared `~/.platformio`, and running both makes
+  builds fail with `No module named 'SCons.Tool.FortranCommon'`. If `pio --version` says
+  6.1.x, you have the wrong one.
 - `custom_sdkconfig` makes pioarduino rebuild the Arduino core. The first build, and the first
   after editing `platformio.ini`, takes several minutes. Editing `platformio.ini` also wipes
   `.pio/build`, so don't edit it while a build is running.
-- Builds sometimes fail with a SCons import error (`SCons.Tool.FortranCommon` or similar).
-  That's pioarduino swapping tool versions; rerun the build.
 - Generated files (`sdkconfig.*`, `CMakeLists.txt`, `managed_components/`, `dependencies.lock`)
   are gitignored; don't commit them.
-- Every build writes `.pio/build/tab5/firmware.factory.bin`: bootloader, partition table and
-  app merged into one image flashed at `0x0`. Releases ship it as `microm8-tab5.bin`.
-- The board definition targets ESP32-P4 chip revisions before v3 (`m5stack-tab5-p4`, the "ES"
-  variant). Rev v3 chips need a different target.
+- Every build writes `.pio/build/<env>/firmware.factory.bin`: bootloader, partition table and
+  app merged into one image flashed at `0x0`.
+- `tab5` targets ESP32-P4 chip revisions before v3 (the board definition's "ES" variant).
+  `tab5_r3` is the same firmware for rev v3 chips, untested on hardware. pioarduino keeps one
+  rebuilt core at a time, so switching between the two envs rebuilds the core (several
+  minutes); see the comment on `tab5_r3` in `platformio.ini`.
+
+## Releases
+
+`.github/workflows/release.yml` runs on a `v*` tag push: native tests, then each env built in
+its own job, then a GitHub release with `microm8-tab5.bin`, `microm8-tab5-rev3.bin` and
+`SHA256SUMS.txt`. The README's install steps link to the latest release's
+`microm8-tab5.bin`, so keep that name. Running the workflow by hand (workflow_dispatch) builds
+the images as an artifact without releasing.
 
 ## Testing on hardware
 

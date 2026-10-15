@@ -19,6 +19,7 @@
 #define CONFIG_TINYUSB_ENABLED 1
 #define CFG_TUSB_MCU OPT_MCU_ESP32P4
 #include "tusb.h"
+#include "class/hid/hid.h" // hid_report_type_t, for the stubs below
 #include "device/usbd_pvt.h"
 
 #include "config.h"
@@ -731,8 +732,10 @@ void tud_msc_capacity_cb(uint8_t, uint32_t *count, uint16_t *size) { *count = 0,
 int32_t tud_msc_scsi_cb(uint8_t, uint8_t const[16], void *, uint16_t) { return -1; }
 bool tud_msc_test_unit_ready_cb(uint8_t) { return false; }
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t) { return nullptr; }
-uint16_t tud_hid_get_report_cb(uint8_t, uint8_t, int, uint8_t *, uint16_t) { return 0; }
-void tud_hid_set_report_cb(uint8_t, uint8_t, int, uint8_t const *, uint16_t) {}
+uint16_t tud_hid_get_report_cb(uint8_t, uint8_t, hid_report_type_t, uint8_t *, uint16_t) {
+  return 0;
+}
+void tud_hid_set_report_cb(uint8_t, uint8_t, hid_report_type_t, uint8_t const *, uint16_t) {}
 void tud_dfu_download_cb(uint8_t, uint16_t, uint8_t const *, uint16_t) {}
 uint32_t tud_dfu_get_timeout_cb(uint8_t, uint8_t) { return 0; }
 void tud_dfu_manifest_cb(uint8_t) {}

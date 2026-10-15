@@ -1,0 +1,86 @@
+# Builds the firmware and, for a version tag (v1.0.0, ...), publishes a GitHub release with
+# the flashable images. A manual run (Actions tab, "Run workflow") builds the images and keeps
+# them as a workflow artifact without releasing.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install pioarduino
+      - run: pio test -e native
+
+  # One job per env: pioarduino keeps a single rebuilt Arduino core per PlatformIO install, so
+  # each env gets its own runner and its own cache of that core.
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - env: tab5
+            image: microm8-tab5.bin
+          - env: tab5_r3
+            image: microm8-tab5-rev3.bin
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The custom_sdkconfig core rebuild takes several minutes; cache it until platformio.ini
+      # changes. pioarduino checks sdkconfig.defaults to decide whether the cached core matches.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            sdkconfig.defaults
+            sdkconfig.${{ matrix.env }}
+          key: platformio-${{ matrix.env }}-${{ runner.os }}-${{ hashFiles('platformio.ini', 'partitions.csv') }}
+
+      # pioarduino's own fork of PlatformIO Core, matching the build tools the platform pins.
+      - run: pip install pioarduino
+
+      - name: Build
+        run: pio run -e ${{ matrix.env }}
+
+      - run: |
+          mkdir dist
+          cp .pio/build/${{ matrix.env }}/firmware.factory.bin dist/${{ matrix.image }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.env }}
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - run: cd dist && sha256sum *.bin > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            Flash `microm8-tab5.bin` at address `0x0` with [ESP Tool](https://espressif.github.io/esptool-js/) in Chrome or Edge. See [Flash microm8 onto the Tab5](https://github.com/${{ github.repository }}#2-flash-microm8-onto-the-tab5).
+
+            `microm8-tab5-rev3.bin` is for Tab5s whose ESP32-P4 reports chip revision v3.x when ESP Tool connects. It's experimental and hasn't been tested on hardware yet.

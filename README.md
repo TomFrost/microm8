@@ -286,18 +286,28 @@ Teensy and a computer, and check that [m8.run](https://m8.run) finds the M8.
 connected, the Tab5's USB-C port is the M8, not the Tab5.
 
 **The Tab5 doesn't start after flashing, and the web flasher reported chip revision v3.x:**
-microm8 is currently built for ESP32-P4 chip revisions before v3. I don't know if the Tab5
-is available in models with newer revisions, but if so, I don't have any for testing. PRs happily
-accepted if someone has one and wants to add support.
+`microm8-tab5.bin` is built for ESP32-P4 chip revisions before v3. Each release also has
+`microm8-tab5-rev3.bin`, the same firmware built for v3 chips. I don't know if the Tab5 ships
+with newer revisions, and I don't have one to test with, so it's untested. If you try it,
+please open an issue and let me know how it went. PRs happily accepted, too.
 
 ---
 
 ## Building from source
 
-You need [PlatformIO](https://platformio.org/). The project uses the
-[pioarduino](https://github.com/pioarduino/platform-espressif32) platform (Arduino core 3.x
-on ESP-IDF 5.5), because the stock PlatformIO platform's ESP-IDF 4.4 USB host stack can't do
-isochronous transfers, which USB audio needs.
+The project uses the [pioarduino](https://github.com/pioarduino/platform-espressif32)
+platform (Arduino core 3.x on ESP-IDF 5.5), because the stock PlatformIO platform's ESP-IDF
+4.4 USB host stack can't do isochronous transfers, which USB audio needs. pioarduino needs its
+own fork of PlatformIO Core, **pioarduino** 6.2.0 or later. Install it with either:
+
+- the [pioarduino IDE](https://marketplace.visualstudio.com/items?itemName=pioarduino.pioarduino-ide)
+  extension for VS Code (or Cursor), which puts `pio` in `~/.platformio/penv/bin`, or
+- `pipx install pioarduino` for the command line.
+
+Use one or the other, not the upstream PlatformIO Core (`brew install platformio`, `pip install
+platformio`) or the PlatformIO IDE extension. All of them share `~/.platformio`, and the two
+cores want different versions of the same build tools, so having both around breaks builds in
+confusing ways. `pio --version` should report 6.2.0 or later.
 
 ```bash
 pio run -t upload -t monitor
@@ -306,7 +316,10 @@ pio run -t upload -t monitor
 The first build takes several minutes: `custom_sdkconfig` makes pioarduino rebuild the Arduino
 core from ESP-IDF source. Later builds take seconds. Every build also writes
 `.pio/build/tab5/firmware.factory.bin`, the single image (flashed at `0x0`) that releases ship
-as `microm8-tab5.bin`.
+as `microm8-tab5.bin`. The `tab5_r3` env builds the same firmware for chip revision v3.
+
+Pushing a version tag (`v1.0.0`, ...) runs `.github/workflows/release.yml`, which runs the
+tests, builds both images and publishes them as a GitHub release.
 
 While the M8 is connected, USB-C is the M8 rather than the Tab5's serial port. Either unplug
 the M8, or run `python3 tools/passthru.py serial` (needs `brew install libusb`), which gives
@@ -350,10 +363,11 @@ python3 tools/screenshot.py landscape.png
 
 ### Build problems
 
-**The build fails with `No module named 'SCons.Tool.FortranCommon'` (or another SCons
-error).** pioarduino swaps build-tool versions during a build, mostly on the first run after
-`custom_sdkconfig` changes, and with more than one PlatformIO Core installed. Run the build
-again. If it keeps happening, delete `~/.platformio/packages/tool-scons` and retry.
+**The build fails with `No module named 'SCons.Tool.FortranCommon'`, or PlatformIO says the
+platform needs a newer core.** You're building with the upstream PlatformIO Core, or another
+copy of it is running too (often the PlatformIO IDE extension), and it's swapping out the build
+tools pioarduino installed. Build with the pioarduino core only; see
+[Building from source](#building-from-source).
 
 **The log shows `Configuration descriptor larger than control transfer max length`.** The
 USB stack's control-transfer limit is too small for the M8's 376-byte descriptor.
