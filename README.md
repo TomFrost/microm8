@@ -224,7 +224,7 @@ and pull its SD card to drop on samples.
 
 With some soldering, the Teensy can live inside the Tab5. A 3D-printed backplate replaces the
 Tab5's back cover and holds the Teensy, with a short 4-wire lead to the Tab5's USB-A port. The
-backplate model is coming soon to Printables. <!-- TODO: Printables link -->
+backplate model is on [Printables](https://www.printables.com/model/1878492-microm8-backplate-for-m5stack-tab5).
 
 <p align="center">
 <img src="docs/images/back-with-backplate.jpg" width="580" alt="The back of the Tab5 with the 3D-printed backplate attached and the NP-F550 battery in place">
@@ -232,7 +232,7 @@ backplate model is coming soon to Printables. <!-- TODO: Printables link -->
 
 **You'll need:**
 
-- The printed backplate, and four M3×6 mm socket-head screws to hold it on. PETG recommended for flexibility and heat resistance.
+- The [printed backplate](https://www.printables.com/model/1878492-microm8-backplate-for-m5stack-tab5), and four M3×6 mm socket-head screws to hold it on. PETG recommended for flexibility and heat resistance.
 - Four short wires
 - Optionally, a 4-pin connector, such as a Dupont housing
 - Optionally, Kapton tape (polymide film tape as wide as the Teensy)
