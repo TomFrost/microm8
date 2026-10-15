@@ -135,7 +135,9 @@ and prepare its microSD card.
 
 ### 2. Flash microm8 onto the Tab5
 
-1. Download `microm8-tab5.bin` from the [latest release](../../releases/latest).
+1. Download **[microm8-tab5.bin](../../releases/latest/download/microm8-tab5.bin)**, the latest
+   version. (You can also open the [latest release](../../releases/latest) page and click
+   `microm8-tab5.bin` in its **Assets** list. You don't need a GitHub account for either.)
 2. If the Teensy is plugged into the Tab5, unplug it. Connect the Tab5's USB-C port to your
    computer and turn the Tab5 on.
 3. Open Espressif's web flasher, [ESP Tool](https://espressif.github.io/esptool-js/), in Chrome
@@ -146,6 +148,10 @@ and prepare its microSD card.
 6. When it finishes, press the Tab5's reset button.
 
 The Tab5 shows the microm8 splash screen, waiting for the M8.
+
+**Updating:** download the newest `microm8-tab5.bin` and repeat these steps. Flashing resets
+your saved settings (volumes, brightness, key layout) to their defaults. To hear about new
+versions, use **Watch → Custom → Releases** at the top of this page (needs a GitHub account).
 
 ### 3. Plug in and play
 
@@ -287,7 +293,8 @@ connected, the Tab5's USB-C port is the M8, not the Tab5.
 
 **The Tab5 doesn't start after flashing, and the web flasher reported chip revision v3.x:**
 `microm8-tab5.bin` is built for ESP32-P4 chip revisions before v3. Each release also has
-`microm8-tab5-rev3.bin`, the same firmware built for v3 chips. I don't know if the Tab5 ships
+[microm8-tab5-rev3.bin](../../releases/latest/download/microm8-tab5-rev3.bin), the same
+firmware built for v3 chips. I don't know if the Tab5 ships
 with newer revisions, and I don't have one to test with, so it's untested. If you try it,
 please open an issue and let me know how it went. PRs happily accepted, too.
 
