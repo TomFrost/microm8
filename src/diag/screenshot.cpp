@@ -61,11 +61,11 @@ void send() {
 
   const int count = width * height;
   for (int i = 0; i < count;) {
-    const uint16_t colour = pixels[i];
+    const uint16_t color = pixels[i];
     int run = 1;
-    while (i + run < count && run < 0xFFFF && pixels[i + run] == colour) run++;
-    const uint8_t rec[4] = {(uint8_t)(run & 0xFF), (uint8_t)(run >> 8), (uint8_t)(colour & 0xFF),
-                            (uint8_t)(colour >> 8)};
+    while (i + run < count && run < 0xFFFF && pixels[i + run] == color) run++;
+    const uint8_t rec[4] = {(uint8_t)(run & 0xFF), (uint8_t)(run >> 8), (uint8_t)(color & 0xFF),
+                            (uint8_t)(color >> 8)};
     emit(rec, sizeof(rec));
     i += run;
   }

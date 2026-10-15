@@ -1,166 +1,298 @@
 # microm8
 
-Standalone firmware that turns an **M5Stack Tab5** (ESP32-P4) into a battery-powered handheld
-for the **Dirtywave M8 Headless** running on a Teensy 4.1.
+**A battery-powered and microcontroller-based handheld for the Dirtywave M8 Headless.**
 
-The Teensy plugs into the Tab5's USB-A port. The Tab5 powers it, renders the M8's screen,
-plays its audio through the speaker or headphone jack, and sends key presses from an
-on-screen multi-touch keypad. It works in portrait, with the M8's own key layout, and in
-landscape, with a bigger M8 screen and keys at the sides.
-
-Plugged into a computer while the M8 is connected, the Tab5's USB-C port passes the M8 through,
-so m8c or [m8.run](https://m8.run) can use it too (see [Using a computer](#using-a-computer)).
-
-The protocol handling comes from [m8c](https://github.com/laamaa/m8c), reimplemented for the
-ESP32.
-
-<p>
-<img src="docs/screenshot-landscape-compact.png" width="560" alt="Landscape with compact keys: the M8's song view at 3x in the middle; status icons, the arrow pad, and OPTION and SHIFT in the bottom corner on the left; the power, key layout and HOLD icons over a 2x2 grid of OPTION, EDIT, SHIFT and PLAY on the right">
-<img src="docs/screenshot-portrait-compact.png" width="177" alt="Portrait with compact keys: the M8's song view across the top, the status bar under it, then the arrow pad beside a 2x2 grid of OPTION, EDIT, SHIFT and PLAY">
+<p align="center">
+<img src="docs/images/hero-landscape-compact.jpg" width="760" alt="A Tab5 running microm8 in landscape, propped up on a couch: the M8's song view fills the middle of the screen, with an arrow pad on the left and OPTION, EDIT, SHIFT and PLAY on the right">
 </p>
 
-*Landscape and portrait, with compact keys. Screenshots from the device (see
-[Screenshots](#screenshots)).*
+microm8 is firmware for the [M5Stack Tab5](https://shop.m5stack.com/products/m5stack-tab5-iot-development-kit-esp32-p4)
+that turns it into a portable M8. Plug a Teensy 4.1 running
+[M8 Headless](https://github.com/Dirtywave/M8HeadlessFirmware) into the Tab5's USB-A port and
+you get the M8 on a 5" touchscreen, with a speaker, a headphone jack, two microphones for
+sampling, and a battery that powers the Teensy too. Nothing to configure, no computer needed after flashing.
 
-## Layout
+Plug the Tab5 into a computer and the M8 shows up there as well, as if it were connected
+directly, while the Tab5 keeps playing.
 
-The screen follows the Tab5's accelerometer through all four orientations. The rotation icon
-locks it; tap it again to unlock. The lock and the last orientation are saved.
+> [!IMPORTANT]
+> **The M8 is Trash80's work, and the real thing is better.** microm8 only exists because
+> Dirtywave publishes M8 Headless for free. The M8 hardware, with its real keys, its build
+> quality, its I/O ports, and its battery life, is and always will be the best way to play
+> the M8, and the M8 app is the best way to take it anywhere on your phone. If you enjoy
+> microm8, please support the person who made all of it:
+>
+> - [**M8 Tracker Model:02**](https://dirtywave.com/products/m8-tracker-model-02) from Dirtywave
+> - [**M8 Music Tracker**](https://apps.apple.com/us/app/id6806721202) for iPhone and iPad
 
-The M8's 320×240 screen is scaled with pixel-area resampling. Each display pixel averages the
-M8 pixels it covers, so text stays sharp at non-integer scales.
+## Features
 
-**Portrait** (720×1280):
+**The headless experience in your hands.** The M8's screen is scaled up to 2.25× in portrait and 3× in
+landscape, with sharp text and silent touch controls on a device that's not trying to pop up email
+and text alerts.
 
-- **M8 screen at 2.25×** (720×540) across the full width at the top.
-- **Status bar:** connection and firmware version on the left; mic, key layout, HOLD, volume,
-  brightness, rotation and power icons on the right.
-- **The M8's own key layout** along the bottom: the cursor keys as an inverted T, SHIFT/PLAY
-  directly under DOWN/RIGHT, and OPTION/EDIT up and to the right of UP, as on the hardware.
-  Keys are 144 px (about 12.5 mm).
+**Two key layouts, any orientation.** Use the M8's own key arrangement, or a compact layout
+with an arrow pad under one thumb and the M8's OPTION, EDIT, SHIFT and PLAY under the other.
+Turn the Tab5 any way you like and the screen follows, or lock it when you want it to stay put.
 
-**Landscape** (1280×720):
+<table>
+<tr><th>M8 layout</th><th>Compact layout</th></tr>
+<tr>
+<td><img src="docs/images/portrait-m8-keys.jpg" width="380" alt="Portrait with the M8 layout: the M8 screen at the top, the status bar, then the cursor keys as an inverted T with OPTION and EDIT up to the right and SHIFT and PLAY below"></td>
+<td><img src="docs/images/portrait-compact.jpg" width="380" alt="Portrait with the compact layout: an arrow pad on the left and a 2x2 grid of OPTION, EDIT, SHIFT and PLAY symbols on the right"></td>
+</tr>
+<tr>
+<td><img src="docs/images/landscape-m8-keys.jpg" width="380" alt="Landscape with the M8 layout: an arrow pad, OPTION and SHIFT in the left margin; EDIT, OPTION, PLAY and SHIFT stacked in the right margin"></td>
+<td><img src="docs/images/landscape-compact.jpg" width="380" alt="Landscape with the compact layout: an arrow pad and OPTION and SHIFT symbols on the left, a 2x2 grid of OPTION, EDIT, SHIFT and PLAY symbols on the right"></td>
+</tr>
+</table>
 
-- **M8 screen at 3×** (960×720), centred.
-- **Left margin:** the volume, brightness, rotation and mic icons; under them a panel with
-  the arrow pad (or an open slider, the power details or a message); OPTION over SHIFT in the
-  bottom-left corner.
-- **Right margin:** the power, key layout and HOLD icons; under them EDIT, OPTION, PLAY and
-  SHIFT, stacked up from the bottom-right corner. Landscape keys are low (88 px), so they're
-  easy to reach from the bottom corners.
-- No connection text, to keep the margins clear.
+**Sound everywhere.** The Tab5's speaker for quick ideas, the 3.5 mm jack for everything else.
+Headphone detection picks the right output, and we save a separate volume setting for each.
 
-**Compact keys** (the key layout icon toggles them, in either orientation): the arrow pad for
-the left thumb, and the M8's own right-hand block for the right, OPTION and EDIT over SHIFT and
-PLAY, drawn as symbols (⌥, a pencil, ⇧, ▶).
+**Sample ready.** The Tab5's two microphones record in stereo straight into the M8's
+sampler. Enable the mics when you're ready, and the M8's built-in input volume setting controls
+levels. If it's not getting sensitive enough, try adding some boost in microm8's mic menu.
 
-- **Portrait:** the arrow pad and the block, full size, centred between the status bar and
-  the bottom of the screen.
-- **Landscape:** the block is a square grid level with the arrow pad. OPTION and SHIFT appear
-  again in the bottom-left corner, so every chord has a key under each thumb: a touchscreen
-  can't press two keys under one thumb, as you would OPTION+EDIT on the hardware.
+**Your computer, too.** The Tab5's USB-C port passes the M8 through to a computer. Open
+[m8.run](https://m8.run) and edit on a big screen with a real keyboard, record the M8's audio
+in your DAW, or drive your DAW's instruments from the M8's USB MIDI, all while the Tab5 keeps
+showing and playing the M8. Keys pressed on the computer and on the touchscreen combine.
+See [Using a computer](#using-a-computer).
 
-Keys are drawn in the M8's cyan (dimmed); while held, they turn white and their touch area is
-outlined.
+**One-hand key combos.** HOLD mode turns SHIFT and OPTION into tappable toggles, so you can play any
+combo with one or two fingers.
 
-<p>
-<img src="docs/screenshot-landscape-normal.png" width="560" alt="Landscape with the normal keys: the arrow pad, then OPTION over SHIFT on the left; EDIT, OPTION, PLAY and SHIFT stacked up from the bottom on the right">
-<img src="docs/screenshot-portrait-normal.png" width="177" alt="Portrait with the M8 key layout: OPTION and EDIT over the cursor keys, with SHIFT and PLAY under DOWN and RIGHT">
+**Runs on a camera battery.** The Tab5 runs from a standard NP-F550 camera battery and powers
+the Teensy from it. Playing at full brightness, the whole thing draws about 3 W, which works out to
+roughly four hours on the stock 2000 mAh pack (estimated from measured power draw). Charge over
+USB-C, even while you play. Around 7-8 hours of battery life with brightness turned down. The Tab5
+_dumps_ heat when you set the brightness at full, so keeping it low is nicer anyway.
+
+## What works
+
+<table>
+<tr><th>✅ Working</th><th>❌ Not working</th></tr>
+<tr>
+<td valign="top">
+
+- M8 screen, keys and audio
+- M8 and compact key layouts
+- Auto-rotate to any orientation
+- Rotation lock
+- Multi-touch key combos
+- Gesure-based arrow controls in landscape
+- HOLD for one-handed combos
+- Onboard speaker
+- 3.5 mm headphones
+- Headphone detection
+- Stereo sampling with the dual mics
+- USB-C passthrough to a computer
+- USB MIDI through passthrough
+- Battery level and charging status
+- Charging over USB-C while playing
+- Volume and brightness controls
+- Settings saved across restarts
+
+</td>
+<td valign="top">
+
+- USB MIDI devices on USB-C 🧪
+- USB-C headphones 🧪
+- Computer audio into the M8 over passthrough 🧪
+- USB hubs on the USB-A port
+- Bluetooth headphones (A2DP over BLE)
+- Bluetooth headphones (A2DP over Bluetooth Classic) ⛔
+
+<br>
+
+🧪 Might be possible or requires custom wiring; needs testing.<br>
+⛔ Never. The Tab5's hardware can't do it. Womp womp.
+
+</td>
+</tr>
+</table>
+
+## Getting started
+
+### What you need
+
+- An **[M5Stack Tab5 Kit](https://shop.m5stack.com/products/m5stack-tab5-iot-development-kit-esp32-p4)**.
+  Choose the option with the NP-F550 battery, unless you already have one.
+- A **[Teensy 4.1](https://www.pjrc.com/store/teensy41.html)** running M8 Headless, with a
+  microSD card. Dirtywave's
+  [M8 Headless setup guide](https://github.com/Dirtywave/M8Docs/blob/main/docs/M8HeadlessSetup.md)
+  covers everything.
+- A **micro-USB to USB-A data cable**. A short one is easiest to carry. Some cables only carry
+  power; those won't work.
+- A computer with **Chrome or Edge**, for flashing.
+
+### 1. Set up the Teensy
+
+Follow the [M8 Headless setup guide](https://github.com/Dirtywave/M8Docs/blob/main/docs/M8HeadlessSetup.md):
+download the latest firmware and flash it onto the Teensy with TyUploader (part of TyTools),
+and prepare its microSD card.
+
+### 2. Flash microm8 onto the Tab5
+
+1. Download `microm8-tab5.bin` from the [latest release](../../releases/latest).
+2. If the Teensy is plugged into the Tab5, unplug it. Connect the Tab5's USB-C port to your
+   computer and turn the Tab5 on.
+3. Open Espressif's web flasher, [ESP Tool](https://espressif.github.io/esptool-js/), in Chrome
+   or Edge.
+4. Click **Connect** and choose the Tab5 (it shows up as a USB JTAG/serial debug unit).
+5. Set **Flash Address** to `0x0` (it starts out as `0x1000`), choose `microm8-tab5.bin` as the
+   **File**, and click **Program**.
+6. When it finishes, press the Tab5's reset button.
+
+The Tab5 shows the microm8 splash screen, waiting for the M8.
+
+### 3. Plug in and play
+
+Plug the Teensy into the Tab5's **USB-A** port. The Tab5 powers it, and the M8 appears a few
+seconds later. Done, go play.
+
+<p align="center">
+<img src="docs/images/portrait-m8-keys-angled.jpg" width="360" alt="A Tab5 running microm8 in portrait, leaning against a cushion: the M8's song view at the top, the status bar, and the M8 key layout below">
 </p>
 
-*The normal keys (compact keys off), landscape and portrait.*
-
-To turn portrait upside down, uncomment `-DTAB5_ROTATE_180=1` in `platformio.ini`. If tilting
-picks the wrong orientation, the `TAB5_GRAVITY_*` settings in `src/config.h` map the
-accelerometer's axes to orientations; the log's `orientation:` lines show the readings.
+Want it all in one piece, with no cable hanging off the side? See
+[Going cable-free](#going-cable-free-optional).
 
 ## Controls
 
-- **Keys:** every key a finger is touching counts as held, so M8 combos work as on the
-  hardware: hold SHIFT, EDIT or OPTION and tap or hold a cursor key. Each key's touch area
-  reaches halfway into the gap around it, so near misses still count without neighbouring
-  keys overlapping.
-- **Arrows in landscape:**
-  - **Arrow pad:** the four arrows in the left panel. Each arrow owns a triangle of the
-    panel, cut by the diagonals of the square around the arrows, so the whole panel is
-    touchable.
-  - **Swipes:** swipe right, left, up or down anywhere on the left half of the screen (the M8
-    screen included). Keep the finger down to hold the arrow; lifting it releases.
-- **Volume icon** (a speaker, or headphones when they're the output): opens a row with an
-  output selector (speaker and headphones, the selected one lit) and a volume slider (0–10).
-  Plugging headphones in switches to them automatically, and unplugging switches back; at
-  power-on the output follows the jack. Each output keeps its own volume.
-- **Brightness icon** (sun): opens a brightness slider. The lowest step is 30%, where the
-  backlight stops dimming. Dimming also cuts power: about 0.8 W between 30% and full.
-- **Rotation icon:** locks or unlocks rotation (crossed out in red when locked).
-- **Key layout icon:** switches compact keys on or off (lit while on).
-- **HOLD icon** (an H key cap): for playing chords one key at a time, with one hand or one
-  finger. While HOLD is on (the icon fills white), tapping SHIFT or OPTION holds it down until
-  it's tapped again, whatever else you press in between: SHIFT, then RIGHT, RIGHT, RIGHT, then
-  SHIFT again. HOLD stays on until you tap its icon.
-- **Power icon:** a battery filled and coloured by charge (green when full, yellow around
-  half, red when low); an empty battery with a green bolt while charging; a full battery with
-  a light bolt when plugged in and full; a plug when no battery is fitted. Tap it for the
-  details in words.
-- **Sliders:** once a finger grabs a slider, the slider follows it until it lifts, wherever
-  it moves. Slide your thumb off to see the knob.
-- **Mic icon:** opens the mic row: an off/on switch and a boost selector (see Recording below).
-  Struck through while off, red while live.
-- Rows open under the status bar (in landscape, in the left panel) without covering the M8
-  screen, and close when you tap the icon again or 4 seconds after the last touch. Volumes,
-  output, brightness, mic boost, compact keys and HOLD are saved to flash.
+Every key a finger is touching counts as held, so M8 combos work as they do on the hardware:
+hold SHIFT, EDIT or OPTION and tap or hold an arrow. Keys light up white while held, with their
+touch area outlined.
 
-## Recording
+The status icons sit under the M8 screen in portrait and in the side margins in landscape.
 
-The Tab5's two microphones can be recorded on the M8 like any input:
+| Icon | What it does |
+|---|---|
+| Speaker or headphones | Volume, and the choice of speaker or headphones. |
+| Sun | Screen brightness. Dimming also saves power. |
+| Circular arrow | Locks or unlocks rotation (crossed out in red while locked). |
+| Microphone | Turns the mics on or off, and sets their boost (struck through while off, red while live). |
+| Key layout | Switches between the M8 and compact layouts (lit while compact). |
+| H key cap | HOLD (filled while on). |
+| Battery | Charge level, colored green to red, or a bolt while charging. Tap for details. |
 
-1. Tap the mic icon and switch the mic on (it starts off at every power-on, so the speaker
-   can't unexpectedly feed back into it). The icon turns red.
-2. In the M8's sample recorder, set SRC to Line (or MIC: on the Headless they're the same
-   input). The USB source records nothing from the Tab5.
-3. Set the level with the recorder's VOL; FF gives a good level for speech within about a
-   foot. If that's not enough, the mic row's boost adds +6 or +12 dB digitally, which raises
-   the noise along with the signal.
+Tapping an icon opens its controls under the status bar (or left panel in landscape)
+without covering the M8 screen. They close automatically or when you tap the icon again.
+All settings are saved except the mic, which starts off at every power-on so the speaker
+can't surprise you by feeding back into it.
 
-The mics arrive as stereo (left and right mic), streamed to the M8's USB audio input at the
-M8's own clock rate (from its feedback endpoint), so recordings don't crackle. Use headphones,
-or turn the M8's input monitoring down, if the speaker feeds back into the mics.
+**Arrows in landscape:** tap the arrow pad, or swipe anywhere on the left half of the screen
+(the M8 screen included) and keep your finger down to hold the arrow.
+
+**HOLD:** while HOLD is on, a tap on SHIFT or OPTION keeps it held until you tap it again,
+whatever you press in between: SHIFT, then RIGHT, RIGHT, RIGHT, then SHIFT again. HOLD stays
+on until you tap its icon.
+
+### Recording from the mics
+
+1. Tap the mic icon and switch the mics on. The icon turns red.
+2. In the M8's sample recorder, set SRC to Line (L&R) or MIC (on the Headless they're the same input).
+3. Set the level with the recorder's VOL. A0 works well for a voice within about a foot. If
+   you go to DD and that's still not enough, the mic row's boost adds +6 or +12 dB digitally.
+
+The left and right mics record as a stereo pair. The quality on this thing is surprisingly good.
 
 ## Using a computer
 
-While the M8 is connected, the Tab5's USB-C port presents it to a computer as if it were
-plugged in directly: same name, same USB IDs, the same serial port, and its audio as a
-44.1 kHz stereo input called "M8". m8c, [m8.run](https://m8.run) and other M8 tools find it
-as usual, and a DAW can record it and use its USB MIDI. The Tab5 keeps showing the M8 and
-playing its audio throughout.
+While the M8 is connected, plug the Tab5's USB-C port into a computer. The computer sees the M8
+exactly as if it were plugged in directly: same name, same serial port, and its audio as a
+44.1 kHz stereo input called "M8". The Tab5 keeps showing the M8 and playing its audio
+throughout.
 
-- **Keys** pressed on the computer and on the Tab5 combine: hold SHIFT on the touchscreen and
-  press an arrow key on the computer, or the other way round.
-- **Closing m8c or m8.run** doesn't stop the M8's screen on the Tab5: their "disconnect"
-  command isn't passed on.
-- **Not passed through:** the M8's audio input (sending audio from the computer into the M8's
-  sample recorder). The Tab5's USB-C controller runs out of endpoints for it. Record into the
-  M8 from the Tab5's mics instead (see Recording).
-- **The link is full speed** (12 Mbit/s), which carries the M8's screen, stereo audio and MIDI
-  with room to spare.
+- **[m8.run](https://m8.run)** and other M8 tools connect as usual. Keys pressed on the
+  computer and on the touchscreen combine, so you can hold SHIFT on the Tab5 and press an arrow
+  on the keyboard.
+- **Your DAW** can record the M8's audio and use its USB MIDI, in both directions.
+- **Closing m8.run** doesn't turn off the M8's screen on the Tab5.
+- **Charging** works as usual: the computer's port charges the Tab5.
 
-With no M8 connected, USB-C is the P4's own USB serial port, for flashing, logs and
-screenshots. With the M8 connected, `python3 tools/passthru.py serial` (needs
-`brew install libusb`) gives USB-C back to the serial port until the M8 reconnects or the Tab5
-restarts, so you can flash, watch the log or take a screenshot; flashing restarts the Tab5, which
-then passes the M8 through again. `python3 tools/passthru.py stats 10` prints the passthrough's
-audio counters. To keep USB-C as the serial port at all times, set `MICROM8_USB_PASSTHROUGH` to
-0 in `src/config.h`.
+Sending audio from the computer into the M8 doesn't work yet: the Tab5's second USB
+controller has no endpoint left for the feedback channel the M8's audio input uses. Record into the M8 from the Tab5's mics instead, or power down
+and pull its SD card to drop on samples.
 
-## Hardware setup
+## Going cable-free (optional)
 
-- **M8:** connect the Teensy 4.1's micro-USB to the Tab5's **USB-A** port with a data cable.
-  The Tab5 supplies 5 V on that port, so the Teensy needs no other power.
-- **USB-C:** charging, and either the M8 passed through to a computer (while the M8 is
-  connected) or flashing and serial logs (while it isn't). See [Using a computer](#using-a-computer).
-- **Battery:** the Tab5's NP-F550 pack powers everything.
+<p align="center">
+<img src="docs/images/inside-open.jpg" width="760" alt="The Tab5 opened up next to its 3D-printed backplate, with a Teensy 4.1 mounted inside the backplate and four wires running from it to a connector on the Tab5's board">
+</p>
 
-## Building and flashing
+With some soldering, the Teensy can live inside the Tab5. A 3D-printed backplate replaces the
+Tab5's back cover and holds the Teensy, with a short 4-wire lead to the Tab5's USB-A port. The
+backplate model is coming soon to Printables. <!-- TODO: Printables link -->
+
+<p align="center">
+<img src="docs/images/back-with-backplate.jpg" width="580" alt="The back of the Tab5 with the 3D-printed backplate attached and the NP-F550 battery in place">
+</p>
+
+**You'll need:**
+
+- The printed backplate, and four M3×6 mm socket-head screws to hold it on. PETG recommended for flexibility and heat resistance.
+- Four short wires
+- Optionally, a 4-pin connector, such as a Dupont housing
+- Optionally, Kapton tape (polymide film tape as wide as the Teensy)
+
+**Wiring:** connect the four USB lines of the Tab5's USB-A port to the Teensy: 5 V, D−, D+ and
+ground. On the Teensy, 5 V goes to the VBUS pin and ground to a GND pin; the data lines go to the
+two pads right behind the micro-USB connector on the underside. In the photos, red is 5 V,
+black is ground, blue is D-, yellow is D+. Refer to the [Teensy pinout](https://www.pjrc.com/teensy/pinout.html)
+to be sure you're soldering to the right place. Red on the Teensy should go to VBUS, not 5V or VIN.
+
+**Assembly:** the Teensy snaps right in. Ensure you're putting the microSD card side of the Teensy
+at the edge with the cutout, and press into place.
+
+<table>
+<tr>
+<td><img src="docs/images/wiring-usb-a.jpg" width="380" alt="The wires soldered to the pins behind the Tab5's USB-A port, with the ground wire on the port's metal housing"></td>
+<td><img src="docs/images/wiring-teensy-bottom.jpg" width="380" alt="The underside of the Teensy, with the two data wires soldered to the pads behind the micro-USB connector and the ground wire on a GND pin"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><img src="docs/images/wiring-teensy-top.jpg" width="500" alt="The top of the Teensy, with the 5 V wire soldered to the 5V pin and the four wires ending in a Dupont connector"></td>
+</tr>
+</table>
+
+Tips:
+
+- **Ground:** the USB-A port's ground pin sinks a lot of heat and is hard to solder. The port's
+  metal housing is also ground, and the bottom of the housing takes solder much more easily.
+  I attached my black wire straight to that housing on the right side. All grounds are connected
+  on the Tab5, so you can connect to any GND point.
+- **Leave a way to connect a cord.** To update M8 Headless, the Teensy has to be plugged into a
+  computer by its micro-USB port, and _ideally_ it shouldn't be wired to the Tab5 at the same time. A
+  connector in the lead, like the crimped Dupont connector in the photos, makes that easy. Any
+  flat 4-pin connector works, but if it's bulky it may not fit under the backplate. If you don't
+  have a connector, that's ok: Leave space to get a micro-USB cable plugged in, and always disconnect
+  the battery from the Tab5 before doing that.
+- **Kapton tape** along the underside of the Teensy keeps its pads from shorting against the
+  Tab5's internals, in particular the Tab5's microSD card holder. It's optional, but
+  recommended. Any heat-resistant polymide film tape works.
+
+## Troubleshooting
+
+**In general: the M8 area shows a log.** While no M8 is connected, the Tab5 shows its latest log lines in
+the M8 area, so you can see what's going on without a computer. Errors are red and warnings
+amber.
+
+**"Connect M8 Headless" stays on screen:** The Tab5 doesn't see the Teensy. The cable is
+probably power-only, or the Teensy isn't running M8 Headless. Try the same cable between the
+Teensy and a computer, and check that [m8.run](https://m8.run) finds the M8.
+
+**The web flasher can't connect:** Unplug the Teensy from the Tab5 first: while the M8 is
+connected, the Tab5's USB-C port is the M8, not the Tab5.
+
+**The Tab5 doesn't start after flashing, and the web flasher reported chip revision v3.x:**
+microm8 is currently built for ESP32-P4 chip revisions before v3. I don't know if the Tab5
+is available in models with newer revisions, but if so, I don't have any for testing. PRs happily
+accepted if someone has one and wants to add support.
+
+---
+
+## Building from source
 
 You need [PlatformIO](https://platformio.org/). The project uses the
 [pioarduino](https://github.com/pioarduino/platform-espressif32) platform (Arduino core 3.x
@@ -171,11 +303,16 @@ isochronous transfers, which USB audio needs.
 pio run -t upload -t monitor
 ```
 
-While the M8 is connected, USB-C is the M8 passed through rather than the Tab5's serial port:
-run `python3 tools/passthru.py serial` first, or unplug the M8.
-
 The first build takes several minutes: `custom_sdkconfig` makes pioarduino rebuild the Arduino
-core from ESP-IDF source (see [Troubleshooting](#troubleshooting)). Later builds take seconds.
+core from ESP-IDF source. Later builds take seconds. Every build also writes
+`.pio/build/tab5/firmware.factory.bin`, the single image (flashed at `0x0`) that releases ship
+as `microm8-tab5.bin`.
+
+While the M8 is connected, USB-C is the M8 rather than the Tab5's serial port. Either unplug
+the M8, or run `python3 tools/passthru.py serial` (needs `brew install libusb`), which gives
+USB-C back to the serial port until the M8 reconnects or the Tab5 restarts. Flashing restarts
+the Tab5, which then passes the M8 through again. To keep USB-C as the serial port at all
+times, set `MICROM8_USB_PASSTHROUGH` to 0 in `src/config.h`.
 
 ### Tests
 
@@ -187,88 +324,90 @@ pio test -e native
 
 ### Screenshots
 
-`tools/screenshot.py` saves exactly what's on the screen as a PNG, over the USB-C serial port
-(it sends `S`; the firmware replies with its framebuffer, see `src/diag/screenshot.cpp`). It
-needs only Python 3, on macOS or Linux. Close any serial monitor first, since the port can't be
-shared. While the M8 is connected, run `python3 tools/passthru.py serial` first to get the serial
-port back:
+`tools/screenshot.py` saves exactly what's on the screen as a PNG over the USB-C serial port.
+It needs only Python 3, on macOS or Linux. Close any serial monitor first.
 
 ```bash
 python3 tools/screenshot.py landscape.png
 ```
 
-## Architecture
+<table>
+<tr>
+<td><img src="docs/screenshot-landscape-compact.png" width="560" alt="Screenshot, landscape with compact keys: the M8's song view at 3x in the middle; status icons, the arrow pad, and OPTION and SHIFT on the left; the power, key layout and HOLD icons over OPTION, EDIT, SHIFT and PLAY on the right"></td>
+<td><img src="docs/screenshot-portrait-compact.png" width="177" alt="Screenshot, portrait with compact keys: the M8's song view across the top, the status bar under it, then the arrow pad beside OPTION, EDIT, SHIFT and PLAY"></td>
+</tr>
+</table>
 
-| Module | Role |
-|---|---|
-| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight, and forwards the M8's USB MIDI for passthrough. While the mic is on, streams to the M8's audio input, sizing each packet from the M8's rate feedback. Replaces m8c's libusb backend. The M8's descriptor is decoded in [docs/m8-headless-usb.md](docs/m8-headless-usb.md). |
-| `src/usb/passthru.cpp` | USB passthrough on USB-C. While an M8 is connected, swaps the P4's two full-speed PHYs so its OTG 1.1 controller drives USB-C (the Serial/JTAG controller moves to the PHY on the I2S pins, with its pads off), then runs a TinyUSB device with the M8's identity: one class driver owns the whole configuration (CDC serial, UAC2 audio to the computer, USB MIDI), numbered as on the M8 except audio, which moves to endpoint 0x81 (the controller has TX FIFOs for IN endpoints 1-4 only). Vendor requests read audio counters and hand USB-C back to Serial/JTAG (`tools/passthru.py`). Copies of the M8's serial, audio and MIDI go to the computer; the computer's commands go to the M8, with its key state merged into the touch keys and its disconnect command dropped. Audio packets are queued from the USB interrupt, 44 or 45 frames per 1 ms, adjusted to keep about 10 ms buffered. |
-| `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. Ported from m8c. |
-| `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM, drawn with m8c's semantics: font offsets, background-colour tracking, scope clearing. Uses m8c's five bitmap fonts. Tracks changed regions as 8-row bands. |
-| `src/display/ui.cpp` | Portrait and landscape layouts. Changed areas of the M8 screen are scaled (pixel-area resampling) in the panel's native orientation into internal RAM, then copied into the panel's framebuffer by the DSI driver's 2D DMA, timed against the panel's scan so updates don't tear. Keys, status icons, the volume/brightness/power row and the landscape arrow pad are drawn through M5GFX. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
-| `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and the portrait and landscape key layouts and hit-testing. `main.cpp` gives each finger a role (keys, slider, swipe, arrow pad) and produces the M8 key bitmask (`'C'` + mask). |
-| `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), a silence gate so the codec goes quiet between songs, per-output volume levels, mono mix for the speaker. |
-| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. The ES7210 mic ADC on the same bus. |
-| `src/audio/mic.cpp` | Mic capture: reads the mics into a buffer that the USB task drains at the M8's rate, dropping or repeating single frames to absorb clock drift. Optional digital boost. |
-| `src/board.cpp` | M5Unified bring-up, USB-A 5 V, and the lock for the shared internal I2C bus. Switches off hardware microm8 doesn't use (the ESP32-C6 wireless chip and the camera). Battery state from the INA226 current sensor: charging, plugged in, or no battery. |
+### Build options
 
-FreeRTOS tasks: USB (host and passthrough) and audio run on core 0; display and touch run on core 1. Serial data
-passes from USB to the UI task through a stream buffer, so a slow display update never stalls
-USB.
+- `-DTAB5_ROTATE_180=1` in `platformio.ini` turns portrait upside down.
+- `-DTAB5_HP_DET_INSERTED_LEVEL=-1` turns off automatic speaker/headphone switching.
+- If tilting picks the wrong orientation, the `TAB5_GRAVITY_*` settings in `src/config.h` map
+  the accelerometer's axes to orientations; the log's `orientation:` lines show the readings.
+- `-DMICROM8_POWER_DIAG=1` shows the power drawn from the battery in the status bar, logs a
+  power summary every 10 seconds, and measures at boot what switching off unused hardware
+  saves. Only meaningful on battery.
 
-## Status
-
-**Working on the Tab5:** the M8 connects over high-speed USB, and its screen, keys, and audio
-through the speaker and headphones all work, as does recording from the Tab5's mics. Passed
-through to a computer on USB-C, m8.run gets the M8's screen, keys and audio while a DAW plays
-from its USB MIDI, with the Tab5 running alongside.
-
-### Shelved ideas
-
-- **USB MIDI devices on USB-C:** the P4's second (full-speed) USB controller could host a MIDI
-  keyboard or a DIN-MIDI cable on the Tab5's USB-C port and forward to the M8's USB MIDI.
-  Shelved because USB-C can't power them: it's the charger's input, so nothing on the Tab5
-  supplies 5 V there, and feeding it from the Tab5's own 5 V would just charge the battery from
-  itself. A hub on USB-A doesn't work either: ESP-IDF's USB host can't run a full-speed device
-  through a high-speed hub (no transaction translator support) alongside the high-speed M8.
-
-## Troubleshooting
-
-**Measuring power draw:** build with `-DMICROM8_POWER_DIAG=1`. The status bar then shows the
-power drawn from the battery, the log prints a power summary every 10 seconds, and boot
-measures what switching off the C6 and camera saves (about 0.2 W). Only meaningful on
-battery.
-
-**While no M8 is connected, the M8 area shows the last 12 log lines**, so many problems can be
-diagnosed without a computer. Errors are red and warnings amber.
-
-**"Waiting for M8" and the `port:` log line shows `connected=0` the whole time.** The Tab5
-sees nothing on the data lines. The cable is probably charge-only, or the Teensy isn't
-running M8 Headless. Test both by plugging the Teensy into a computer with the same cable and
-checking that m8c finds it.
-
-**The log shows `ENUM: Abort request of enumeration process (0x48a:0x16c0)`.** ESP-IDF
-rejected the device because no enumeration filter approved it. The Arduino core enables the
-filter hook, and ESP-IDF then rejects anything a filter hasn't approved. The firmware
-installs a filter that accepts all devices; if you see this, that code is missing.
-
-**The log shows `Configuration descriptor larger than control transfer max length`.** The
-USB stack's control-transfer limit is too small for the M8's 376-byte descriptor.
-`platformio.ini` raises it through `custom_sdkconfig`. Check that setting is still there and
-do a clean build (`pio run -t clean`, then build again).
+### Build problems
 
 **The build fails with `No module named 'SCons.Tool.FortranCommon'` (or another SCons
 error).** pioarduino swaps build-tool versions during a build, mostly on the first run after
 `custom_sdkconfig` changes, and with more than one PlatformIO Core installed. Run the build
 again. If it keeps happening, delete `~/.platformio/packages/tool-scons` and retry.
 
-## History
+**The log shows `Configuration descriptor larger than control transfer max length`.** The
+USB stack's control-transfer limit is too small for the M8's 376-byte descriptor.
+`platformio.ini` raises it through `custom_sdkconfig`. Check that setting is still there and
+do a clean build (`pio run -t clean`, then build again).
 
-microm8 began on a Guition JC4827W543 (ESP32-S3, 4.3" 480×272). That version rendered the M8
-and took touch input, but the S3's USB is full-speed only. The M8's audio is timed for
-high-speed USB, so a full-speed host receives only about an eighth of it, and the Headless
-doesn't output audio on I2S either. That's why the project moved to the Tab5. The
-JC4827W543 code remains in the git history: commit `0821825` is the last version with it.
+**The log shows `ENUM: Abort request of enumeration process (0x48a:0x16c0)`.** ESP-IDF
+rejected the device because no enumeration filter approved it. The firmware installs a filter
+that accepts all devices; if you see this, that code is missing.
+
+## How it works
+
+The Tab5's ESP32-P4 has a high-speed USB host controller on its USB-A port. The M8 Headless
+enumerates there as a composite device: a serial port carrying its display protocol and key
+input, USB audio in both directions, and USB MIDI (decoded in
+[docs/m8-headless-usb.md](docs/m8-headless-usb.md)). microm8 draws the M8's screen from the
+serial data, plays its audio through the Tab5's codec, and sends key presses back.
+
+| Module | Role |
+|---|---|
+| `src/usb/m8_usb.cpp` | USB host client on the P4's high-speed controller. Finds the M8's serial and audio interfaces by parsing descriptors, sets DTR/RTS and line coding, keeps bulk and isochronous transfers in flight, and forwards the M8's USB MIDI for passthrough. While the mic is on, streams to the M8's audio input, sizing each packet from the M8's rate feedback. |
+| `src/usb/passthru.cpp` | USB passthrough on USB-C. While an M8 is connected, swaps the P4's two full-speed PHYs so its OTG 1.1 controller drives USB-C (the Serial/JTAG controller moves to the PHY on the I2S pins, with its pads off), then runs a TinyUSB device with the M8's identity: one class driver owns the whole configuration (CDC serial, UAC2 audio to the computer, USB MIDI), numbered as on the M8 except audio, which uses endpoint 0x81 (the controller has TX FIFOs for IN endpoints 1-4 only). Vendor requests read audio counters and hand USB-C back to Serial/JTAG (`tools/passthru.py`). Copies of the M8's serial, audio and MIDI go to the computer; the computer's commands go to the M8, with its key state merged into the touch keys and its disconnect command dropped. Audio packets are queued from the USB interrupt, 44 or 45 frames per 1 ms, adjusted to keep about 10 ms buffered. |
+| `src/m8/slip.c`, `protocol.cpp` | SLIP framing and parsing of M8 commands: rectangle, character, oscilloscope and system info. |
+| `src/m8/screen.cpp` | 320×240 RGB565 framebuffer in PSRAM: font offsets, background-color tracking, scope clearing, and the M8's five bitmap fonts. Tracks changed regions as 8-row bands. |
+| `src/display/ui.cpp` | Portrait and landscape layouts. Changed areas of the M8 screen are scaled (pixel-area resampling) in the panel's native orientation into internal RAM, then copied into the panel's framebuffer by the DSI driver's 2D DMA, timed against the panel's scan so updates don't tear. Keys, status icons, the control rows and the landscape arrow pad are drawn through M5GFX. `splash.cpp` shows the splash and on-screen log while no M8 is connected. |
+| `src/input/touch.cpp`, `keypad.cpp`, `keypad_layout.cpp` | Multi-touch through M5Unified, and the portrait and landscape key layouts and hit-testing. `main.cpp` gives each finger a role (keys, slider, swipe, arrow pad) and produces the M8 key bitmask (`'C'` + mask). |
+| `src/audio/audio_out.cpp` | Ring buffer for USB audio, clock-drift compensation (drops or repeats single frames), a silence gate so the codec goes quiet between songs, per-output volume levels, mono mix for the speaker. |
+| `src/audio/audio_hw.cpp` | ES8388 codec on I2S0. Volume is set in the codec's analog output stage, so its noise floor drops with the volume. Speaker amp enable, headphone detect. The ES7210 mic ADC on the same bus. |
+| `src/audio/mic.cpp` | Mic capture: reads the mics into a buffer that the USB task drains at the M8's rate, dropping or repeating single frames to absorb clock drift. Optional digital boost. |
+| `src/board.cpp` | M5Unified bring-up, USB-A 5 V, and the lock for the shared internal I2C bus. Switches off hardware microm8 doesn't use (the ESP32-C6 wireless chip and the camera). Battery state from the INA226 current sensor: charging, plugged in, or no battery. |
+
+FreeRTOS tasks: USB (host and passthrough) and audio run on core 0; display and touch run on
+core 1. Serial data passes from USB to the UI task through a stream buffer, so a slow display
+update never stalls USB.
+
+Working on microm8 with an AI agent? Point it at [AGENTS.md](AGENTS.md).
+
+## Credits
+
+- **[Dirtywave](https://dirtywave.com)** and Trash80, for the M8, and for releasing M8
+  Headless so projects like this can exist. Please [buy an M8](https://dirtywave.com/products/m8-tracker-model-02)
+  or [the app](https://apps.apple.com/us/app/id6806721202).
+- **[m8c](https://github.com/laamaa/m8c)** by Jonne Kokkonen (laamaa), the original M8
+  Headless client. microm8's protocol handling, drawing rules and fonts are adapted from it,
+  and most M8 Headless clients since learned the protocol from it. Thank you, laamaa. And also
+  for your fire releases on [your Bandcamp](https://laamaa.bandcamp.com) and including your bundles!
+  Despite putting this device together, I'm still terrible at composing on the M8 but I learn so much
+  from those songs. Snowy Day is playing in all the photos.
+- **[M5Stack](https://m5stack.com)**, for the Tab5 and the M5Unified and M5GFX libraries.
+- **[pioarduino](https://github.com/pioarduino/platform-espressif32)**, for keeping the
+  current Arduino core and ESP-IDF available in PlatformIO.
+- **[TinyUSB](https://github.com/hathach/tinyusb)**, behind the USB passthrough.
+- Marcin Borowicz, for the [SLIP decoder](https://github.com/marcinbor85/slip).
+- Claude, because the deep USB magic here was uncharted territory for me at the start of this project.
 
 ## License
 

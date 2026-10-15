@@ -122,7 +122,7 @@ int slider_value(int x, int y, Popup open);
 // left half; nowhere in portrait).
 bool in_swipe_area(int x, int y);
 
-// The key under (x, y) on a pad (the arrow pad or the OPTION/EDIT/PLAY triangle), or 0. The
+// The arrow under (x, y) on the arrow pad, or 0. The
 // landscape panel's arrow pad only counts while the panel shows it.
 uint8_t pad_key_at(int x, int y);
 

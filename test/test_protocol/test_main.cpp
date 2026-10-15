@@ -86,9 +86,9 @@ void test_rect_fills_and_marks_dirty() {
   TEST_ASSERT_EQUAL_HEX64(1ULL << (20 / m8screen::kBandRows), m8screen::take_dirty_bands());
 }
 
-void test_short_rect_reuses_last_colour() {
+void test_short_rect_reuses_last_color() {
   rect(0, 0, 1, 1, 0x12, 0x34, 0x56);
-  slip({0xFE, 50, 0, 60, 0}); // 5 bytes: position only, 1x1, previous colour
+  slip({0xFE, 50, 0, 60, 0}); // 5 bytes: position only, 1x1, previous color
   flush();
   TEST_ASSERT_EQUAL_HEX16(rgb565(0x12, 0x34, 0x56), px(50, 60));
 }
@@ -161,7 +161,7 @@ int main() {
   UNITY_BEGIN();
   RUN_TEST(test_system_info_is_parsed);
   RUN_TEST(test_rect_fills_and_marks_dirty);
-  RUN_TEST(test_short_rect_reuses_last_colour);
+  RUN_TEST(test_short_rect_reuses_last_color);
   RUN_TEST(test_slip_escapes_are_decoded);
   RUN_TEST(test_char_draws_glyph_with_background);
   RUN_TEST(test_waveform_is_right_aligned_and_clamped);

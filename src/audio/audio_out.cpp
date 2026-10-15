@@ -49,7 +49,7 @@ constexpr int32_t kUnityGain = 4096; // Q12
 int32_t digital_gain_q12(int level) { return level > 0 ? kUnityGain : 0; }
 
 inline int16_t scale(int32_t sample, int32_t gain_q12) {
-  // Round symmetrically (half away from zero). A plain >> rounds towards minus infinity, which
+  // Round symmetrically (half away from zero). A plain >> rounds toward minus infinity, which
   // turns tiny negative samples into a persistent -1 at any volume.
   const int32_t scaled = sample * gain_q12;
   sample = (scaled + (scaled >= 0 ? 2048 : -2048)) / 4096;
@@ -100,7 +100,7 @@ bool read_chunk(int16_t *in, bool &playing) {
 }
 
 // Prepares one chunk for the selected output: stereo for headphones; for the speaker, a mono
-// mix in both channels (the boards' speaker amps play a single channel).
+// mix in both channels (the Tab5's speaker amp plays a single channel).
 void render(const int16_t *in, int16_t *out, Output output, int32_t gain) {
   if (output == Output::kHeadphones) {
     for (int i = 0; i < kChunkFrames * 2; i++) out[i] = scale(in[i], gain);

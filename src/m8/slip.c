@@ -1,6 +1,5 @@
 // SLIP decoder for the M8 serial protocol.
-// Adapted from m8c (MIT, Jonne Kokkonen), originally by marcinbor85
-// (https://github.com/marcinbor85/slip, MIT). See LICENSE-THIRD-PARTY.md.
+// Adapted from marcinbor85/slip (MIT) via m8c (MIT); see LICENSE-THIRD-PARTY.md.
 
 #include "slip.h"
 

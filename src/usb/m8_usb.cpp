@@ -520,8 +520,8 @@ void print_class_desc_hex(const usb_standard_desc_t *d) {
   printf("\n");
 }
 
-// Logs every interface and endpoint, decoding USB Audio Class 1.0 streaming formats, so we
-// can see which audio directions, formats and sync modes the M8 offers.
+// Logs every interface and endpoint, decoding USB Audio Class 1.0 and 2.0 streaming formats,
+// to show which audio directions, formats and sync modes the device offers.
 void log_descriptor_summary(const usb_config_desc_t *cfg) {
   static const char *types[] = {"control", "iso", "bulk", "interrupt"};
   static const char *syncs[] = {"none", "async", "adaptive", "sync"};
@@ -630,7 +630,7 @@ bool start_audio() {
   return true;
 }
 
-// Halts, flushes and clears endpoints, so their transfers come back cancelled.
+// Halts, flushes and clears endpoints, so their transfers come back canceled.
 void cancel_endpoints(const uint8_t *endpoints, int n) {
   for (int i = 0; i < n; i++) {
     if (!endpoints[i]) continue;
@@ -730,7 +730,7 @@ void release_all() {
                                eps.feedback_in, eps.midi_in, eps.midi_out};
   cancel_endpoints(endpoints, sizeof(endpoints));
 
-  // Let cancelled/failed transfers drain back through their callbacks.
+  // Let canceled/failed transfers drain back through their callbacks.
   const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(500);
   while ((inflight > 0 || input_inflight > 0) && xTaskGetTickCount() < deadline) {
     usb_host_client_handle_events(client, pdMS_TO_TICKS(10));
@@ -827,7 +827,7 @@ void open_device(uint8_t addr) {
     cur_state = State::kUnsupported;
     return;
   }
-  if (!known_m8) ESP_LOGW(TAG, "unrecognised PJRC PID %04X, trying anyway", dd->idProduct);
+  if (!known_m8) ESP_LOGW(TAG, "unrecognized PJRC PID %04X, trying anyway", dd->idProduct);
 
   esp_err_t err = ESP_OK;
   if (eps.comm_iface >= 0) err = usb_host_interface_claim(client, dev, eps.comm_iface, 0);
@@ -839,7 +839,7 @@ void open_device(uint8_t addr) {
     return;
   }
 
-  // Line state (DTR|RTS) and 115200 8N1, as m8c does. The baud rate is irrelevant over USB but
+  // Line state (DTR|RTS) and 115200 8N1. The baud rate is irrelevant over USB but
   // the Teensy core expects the request.
   const uint16_t comm = eps.comm_iface >= 0 ? eps.comm_iface : 0;
   const uint8_t class_out = USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_CLASS |

@@ -5,7 +5,7 @@
 // headphones keep stereo. Only one output plays at a time, and each output remembers its own
 // volume, which is applied in the codec's analog output stage.
 //
-// The M8 and the ESP32's I2S clocks drift relative to each other, so the ring buffer level is
+// The M8's clock and the Tab5's I2S clock drift relative to each other, so the ring buffer level is
 // held near a target by occasionally dropping or repeating a single frame.
 #pragma once
 
@@ -24,7 +24,7 @@ bool start(int speaker_volume, int headphone_volume, Output output);
 // Producer side, called from the USB task.
 void push(const uint8_t *pcm, size_t bytes);
 
-// True when the firmware was built with the headphone DAC output (MICROM8_HEADPHONES).
+// True if there is a headphone output (always, on the Tab5).
 bool headphones_available();
 
 void set_output(Output output);

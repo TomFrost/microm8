@@ -20,7 +20,7 @@ bool charging();
 // Cheap to call often.
 bool external_power();
 
-// False when no battery is fitted (the Tab5 has no presence signal; this is inferred from the
+// False when no battery is installed (the Tab5 has no presence signal; this is inferred from the
 // battery voltage). Cheap to call often.
 bool battery_present();
 

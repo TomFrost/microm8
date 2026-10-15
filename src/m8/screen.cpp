@@ -1,6 +1,5 @@
-// M8 framebuffer renderer. Drawing semantics follow m8c's render.c / inprint2.c
-// (MIT, Jonne Kokkonen) so that font offsets, background tracking and the oscilloscope
-// behave identically.
+// M8 framebuffer renderer: font offsets, background tracking and the oscilloscope follow the
+// M8's drawing rules. Adapted from m8c (MIT); see LICENSE-THIRD-PARTY.md.
 
 #include "screen.h"
 
@@ -19,7 +18,7 @@ namespace {
 constexpr int kMaxW = 480;
 constexpr int kMaxH = 320;
 constexpr int kGlyphs = 94;     // ASCII 33..126
-constexpr int kFirstGlyph = 33; // m8c: 127 - CHARACTERS_PER_ROW
+constexpr int kFirstGlyph = 33; // 127 - kGlyphs
 constexpr int kMaxGlyphRows = 16;
 constexpr int kMaxFonts = 5;
 
@@ -106,7 +105,7 @@ inline void plot(int x, int y, uint16_t color) {
   if ((unsigned)x < (unsigned)fb_w && (unsigned)y < (unsigned)fb_h) fb[y * fb_w + x] = color;
 }
 
-// Decodes one of m8c's embedded 1-bit BMP font strips into per-glyph row masks.
+// Decodes one of the embedded 1-bit BMP font strips into per-glyph row masks.
 bool decode_font(const inline_font *meta, DecodedFont *out) {
   const uint8_t *bmp = meta->image_data;
   if (meta->image_size < 62 || bmp[0] != 'B' || bmp[1] != 'M') return false;
@@ -228,7 +227,7 @@ void set_font_mode(int mode) {
 void draw_rect(int x, int y, int w, int h, Rgb color) {
   y += screen_offset_y;
 
-  // A full-screen fill means the M8 changed its background colour (theme change / clear).
+  // A full-screen fill means the M8 changed its background color (theme change / clear).
   if (x == 0 && y <= 0 && w == fb_w && h >= fb_h) background = color;
 
   fill(x, y, w, h, rgb565(color));
@@ -256,7 +255,7 @@ void draw_waveform(Rgb color, const uint8_t *samples, int count) {
   const int sx = fb_w - count;
   for (int i = 0; i < count; i++) {
     int v = samples[i];
-    if (v > waveform_max_height) v = waveform_max_height; // m8c: avoid random glitches
+    if (v > waveform_max_height) v = waveform_max_height; // clamp stray values
     plot(sx + i, v, c);
   }
   waveform_cleared = (count == 0);

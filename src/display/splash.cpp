@@ -23,7 +23,7 @@ void show_splash(const char *line1, const char *line2) {
   const m8screen::Rgb bg = {0, 0, 0};
   m8screen::clear(bg);
 
-  const int big = 1; // m8c font_v1_large
+  const int big = 1; // the large font
   const char *title = "microm8";
   const int tx = (m8screen::width() - (int)strlen(title) * m8screen::glyph_advance(big)) / 2;
   m8screen::draw_text(tx, kSplashTitleY, title, {255, 255, 255}, bg, big);

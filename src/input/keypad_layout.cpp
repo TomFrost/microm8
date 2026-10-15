@@ -10,7 +10,7 @@
 //            [SHIFT][ PLAY]                  <- under DOWN and RIGHT
 //
 // Portrait hit rects extend half the key spacing beyond each key, and to the screen edge for
-// outer keys, so near misses still register without neighbouring keys overlapping.
+// outer keys, so near misses still register without neighboring keys overlapping.
 //
 // Landscape: in the margins either side of the M8 screen. The arrows are swipes (main.cpp),
 // or taps on the arrow pad in the left panel.
@@ -107,7 +107,7 @@ constexpr int kLandW = 1280;
 constexpr int kLandH = 720;
 constexpr int kLReach = 16;
 constexpr int kLIconsBottom = 204;        // the power, key layout and HOLD icons
-constexpr int kLPadY = 418;               // the arrow pad's centre
+constexpr int kLPadY = 418;               // the arrow pad's center
 constexpr int kLPitch = LKEY_H + LKEY_GAP;
 constexpr int kLRow3 = kLandH - LKEY_MARGIN - LKEY_H; // the bottom row
 constexpr int kLRow2 = kLRow3 - kLPitch;
@@ -163,9 +163,9 @@ constexpr int kLOuterR = kLInnerR + kLCompactW + kLCompactGap;
 constexpr int kLCompactPadY = kLPadY + 50;
 constexpr int kLGridTop = kLCompactPadY - kLCompactW - kLCompactGap / 2;
 constexpr int kLGridBottom = kLCompactPadY + kLCompactGap / 2;
-// OPTION and SHIFT under the left thumb sit low, in the bottom row, well clear of DOWN (closer,
-// they caught taps meant for it); the pad's touch area reaches down to theirs.
-constexpr int kLCompactPadOffset = 50; // the pad's arrows from its centre
+// OPTION and SHIFT under the left thumb sit low, in the bottom row, well clear of DOWN so they
+// don't catch taps meant for it; the pad's touch area reaches down to theirs.
+constexpr int kLCompactPadOffset = 50; // the pad's arrows from its center
 constexpr int kLLowerTop = kLRow3 - kLSlop;  // where their touch areas start
 constexpr int kLSplitL = LAND_M8_X / 2;
 static_assert(kLCompactPadY + LAND_M8_X / 2 <= kLLowerTop, "compact arrow pad hits the keys");
@@ -197,7 +197,7 @@ const Pad kLandscapeCompactArrows = {LAND_M8_X / 2,
                                      true};
 
 // Portrait compact: the arrow pad for the left thumb and the M8's right-hand block, full-size,
-// for the right, centred between the status bar and the bottom of the screen, the pad on the
+// for the right, centered between the status bar and the bottom of the screen, the pad on the
 // block's two rows. Touch areas reach the bottom of the screen.
 constexpr int kCMargin = 20;
 constexpr int kCTop = PORT_ROW_Y + PORT_ROW_H + 8;

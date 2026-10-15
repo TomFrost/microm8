@@ -1,5 +1,6 @@
-// USB passthrough: the Tab5's USB-C port presents the connected M8 to a computer, so m8c,
-// m8.run or a DAW can use it through the Tab5 while the Tab5 keeps showing and playing it.
+// USB passthrough: the Tab5's USB-C port presents the connected M8 to a computer, so m8.run,
+// other M8 tools or a DAW can use it through the Tab5 while the Tab5 keeps showing and playing
+// it.
 //
 // While no M8 is connected, USB-C stays the ESP32-P4's USB Serial/JTAG port (flashing and
 // logs). When an M8 connects on USB-A, the P4's full-speed USB controller takes over USB-C and

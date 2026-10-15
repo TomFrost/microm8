@@ -229,8 +229,8 @@ void ui_task(void *) {
 
     const uint32_t now = millis();
 
-    // Connection handling, mirroring m8c's enable sequence: enable, reset, and a second
-    // reset shortly after to avoid display glitches.
+    // On each connection: enable the display, reset it, and reset it again shortly after to
+    // avoid display glitches.
     const uint32_t connections = m8usb::connection_count();
     if (connections != seen_connections) {
       seen_connections = connections;
@@ -354,9 +354,9 @@ void ui_task(void *) {
 // - on a status icon or row button: acts once, then is ignored;
 // - on a slider: drags it, following the finger's position along the slider's axis anywhere
 //   on the screen (so the thumb can move off the slider to uncover the knob);
-// - on a pad (arrows, or the OPTION/EDIT/PLAY triangle): holds the key under it, like a key;
+// - on the arrow pad: holds the arrow under it, like a key;
 // - in the swipe area (landscape's left half) but not on a key: an arrow swipe, holding that
-//   arrow from when the swipe is recognised until the finger lifts;
+//   arrow from when the swipe is recognized until the finger lifts;
 // - anywhere else: presses whichever key it's over, so fingers can slide between keys.
 enum class Role : uint8_t { kIgnore, kKeys, kSlider, kSwipe, kPad };
 
@@ -366,7 +366,7 @@ struct Finger {
   Role role;
   int16_t x0, y0;   // where it landed
   ui::Popup slider; // kSlider: the row whose slider it grabbed
-  uint8_t arrow;    // kSwipe: the arrow held, once recognised
+  uint8_t arrow;    // kSwipe: the arrow held, once recognized
   uint32_t arrow_at;
 };
 
@@ -463,8 +463,6 @@ void finger_down(Finger &f, const touch::Point &p, uint32_t now) {
   }
 }
 
-// Turns held arrows into taps at microm8's repeat rate (see ARROW_REPEAT_MS in config.h).
-// `mask` is the keys held on screen; returns what the M8 should see.
 // HOLD, for playing chords one key at a time (with one hand, or one finger). With HOLD on,
 // tapping SHIFT or OPTION holds it down until it's tapped again, whatever else is pressed in
 // between: SHIFT, then RIGHT, RIGHT, RIGHT, then SHIFT again. HOLD itself stays on until its
@@ -484,6 +482,8 @@ uint8_t apply_hold(uint8_t keys, bool on) {
   return (keys & ~kLatchable) | latched;
 }
 
+// Turns held arrows into taps at microm8's repeat rate (see ARROW_REPEAT_MS in config.h).
+// `mask` is the keys held on screen; returns what the M8 should see.
 uint8_t repeat_arrows(uint8_t mask, uint32_t now) {
 #if ARROW_REPEAT_MS == 0
   (void)now;

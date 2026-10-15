@@ -22,7 +22,7 @@ void clean(const char *raw, Line *out) {
   char plain[kLineLen];
   int n = 0;
   for (const char *p = raw; *p && n < (int)sizeof(plain) - 1; p++) {
-    if (*p == '\033') { // skip ANSI colour sequences
+    if (*p == '\033') { // skip ANSI color sequences
       while (*p && *p != 'm') p++;
       if (!*p) break;
       continue;
@@ -44,7 +44,7 @@ void clean(const char *raw, Line *out) {
 }
 
 int hook(const char *fmt, va_list args) {
-  char raw[224]; // room for colour codes and the timestamp prefix
+  char raw[224]; // room for color codes and the timestamp prefix
   va_list copy;
   va_copy(copy, args);
   vsnprintf(raw, sizeof(raw), fmt, copy);

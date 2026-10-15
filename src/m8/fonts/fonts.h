@@ -1,5 +1,5 @@
-// M8 bitmap fonts. The font*.h files are taken unmodified from m8c
-// (MIT, Jonne Kokkonen); each embeds a 1-bit BMP strip of 94 glyphs (ASCII 33..126).
+// M8 bitmap fonts. The font*.h files come unmodified from m8c (MIT; see
+// LICENSE-THIRD-PARTY.md); each embeds a 1-bit BMP strip of 94 glyphs (ASCII 33..126).
 #pragma once
 
 #include <stddef.h>

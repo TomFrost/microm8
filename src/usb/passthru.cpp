@@ -174,7 +174,7 @@ Ring<uint8_t, 1024> midi_ring;
 // ---------------------------------------------------------------------------
 
 usb_phy_handle_t phy;
-bool stack_up;     // TinyUSB initialised (it stays up between M8 connections)
+bool stack_up;     // TinyUSB initialized (it stays up between M8 connections)
 bool attached;     // the full-speed controller owns USB-C
 // A computer asked for Serial/JTAG back (to flash, or for logs): USB-C stays Serial/JTAG
 // until the M8 disconnects or the Tab5 restarts.
@@ -202,7 +202,7 @@ bool serial_zlp, midi_zlp;  // the last IN transfer ended on a packet boundary
 uint16_t midi_pending;      // MIDI from the computer waiting for room in the M8's queue
 
 // The computer's commands to the M8, split up so its key state can be merged with the touch
-// keys. m8c and m8.run send: C mask, K note velocity (or K FF), E, R, D, X.
+// keys. M8 clients send: C mask, K note velocity (or K FF), E, R, D, X.
 uint8_t cmd[3];
 uint8_t cmd_len, cmd_need;
 uint32_t cmds_dropped;

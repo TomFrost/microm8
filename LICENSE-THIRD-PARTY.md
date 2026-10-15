@@ -7,7 +7,7 @@ microm8 contains code adapted from the following projects.
 Source: https://github.com/laamaa/m8c
 
 Used in:
-- `src/m8/fonts/font1.h` … `font5.h`: M8 bitmap fonts, copied unmodified
+- `src/m8/fonts/font1.h` to `font5.h`: M8 bitmap fonts, copied unmodified
 - `src/m8/fonts/fonts.c`, `fonts.h`: font table
 - `src/m8/protocol.cpp`: M8 command parsing (from `command.c`)
 - `src/m8/screen.cpp`: drawing semantics (from `render.c`, `inprint2.c`)

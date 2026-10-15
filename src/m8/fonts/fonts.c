@@ -1,5 +1,5 @@
-// Font table, adapted from m8c (MIT, Jonne Kokkonen).
-// Compiled as C: the font headers initialise a flexible array member, which C++ rejects.
+// Font table. Adapted from m8c (MIT); see LICENSE-THIRD-PARTY.md.
+// Compiled as C: the font headers initialize a flexible array member, which C++ rejects.
 #include "fonts.h"
 #include "font1.h"
 #include "font2.h"

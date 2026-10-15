@@ -48,7 +48,7 @@ constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 const uint16_t kBg = rgb(0, 0, 0);
-const uint16_t kKeyColour = rgb(0, 180, 180); // M8 keys: a label or symbol, in a dimmed M8 cyan
+const uint16_t kKeyColor = rgb(0, 180, 180); // M8 keys: a label or symbol, in a dimmed M8 cyan
 const uint16_t kKeyPressed = rgb(255, 255, 255); // label and touch-area outline while held
 const uint16_t kKeyFill = rgb(30, 30, 34);
 const uint16_t kKeyEdge = rgb(72, 72, 80);
@@ -88,7 +88,7 @@ struct Layout {
   Rect m8;
   Rect status;        // cleared and redrawn with the status
   bool status_text;   // connection text (portrait only)
-  int text_x, text_y; // the connection text's left edge and vertical centre
+  int text_x, text_y; // the connection text's left edge and vertical center
   int icon_x[kIconCount], icon_y[kIconCount];
   Rect row;      // slider / power details row, or the landscape side panel
   bool vertical; // the row is a column (landscape): vertical slider, wrapped text
@@ -183,7 +183,7 @@ void build_axis(uint16_t *src, uint16_t *wt, int out, int in) {
   }
 }
 
-// Blends two RGB565 colours; `w` (0..256) is the weight of `a`.
+// Blends two RGB565 colors; `w` (0..256) is the weight of `a`.
 inline uint16_t blend565(uint16_t a, uint16_t b, int w) {
   if (w >= 256 || a == b) return a;
   if (w <= 0) return b;
@@ -343,7 +343,7 @@ NRect to_native(const Layout &l, const Rect &r) {
 #pragma GCC optimize("O2")
 
 // A source line's pixels, each repeated k times (integer scaling): n output pixels from output
-// position `o` along the line, in steps of `step`. `pitch` is the distance between neighbouring
+// position `o` along the line, in steps of `step`. `pitch` is the distance between neighboring
 // source pixels along the line (1 along a row, the row stride down a column).
 void replicate(uint16_t *dst, int n, const uint16_t *line, int pitch, int k, int o, int step) {
   int i = o / k;
@@ -717,7 +717,7 @@ Rect press_box(const Layout &l, const keypad::Key &k) {
           y1 - y0 - 2 * kPressInset};
 }
 
-// A key: a purple label or arrow; while held, white, with its touch area outlined.
+// A key: a cyan label or symbol; while held, white, with its touch area outlined.
 void draw_key(Gfx &d, const keypad::Key &k, bool down) {
   const Rect b = press_box(L(), k);
   d.fillRect(b.x, b.y, b.w, b.h, kBg);
@@ -725,7 +725,7 @@ void draw_key(Gfx &d, const keypad::Key &k, bool down) {
     d.drawRoundRect(b.x, b.y, b.w, b.h, kKeyRadius, kKeyPressed);
     d.drawRoundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, kKeyRadius - 1, kKeyPressed);
   }
-  const uint16_t fg = down ? kKeyPressed : kKeyColour;
+  const uint16_t fg = down ? kKeyPressed : kKeyColor;
   const int cx = k.vx + k.vw / 2, cy = k.vy + k.vh / 2;
   if (k.icon != keypad::Icon::kNone) {
     const int side = k.vw < k.vh ? k.vw : k.vh;
@@ -780,7 +780,7 @@ void draw_rotation_icon(Gfx &d, int cx, int cy, uint16_t color, bool locked) {
   }
 }
 
-// Colour for a battery level: red when nearly empty, through yellow at 50%, to green at 100%.
+// Color for a battery level: red when nearly empty, through yellow at 50%, to green at 100%.
 uint16_t battery_color(int percent) {
   struct Rgb {
     float r, g, b;
@@ -798,7 +798,7 @@ uint16_t battery_color(int percent) {
              (uint8_t)(a.b + (b.b - a.b) * u));
 }
 
-// Lightning bolt, about 16 x 26, centred on (cx, cy).
+// Lightning bolt, about 16 x 26, centered on (cx, cy).
 void draw_bolt(Gfx &d, int cx, int cy, uint16_t color) {
   const int x = cx - 8, y = cy - 13;
   d.fillTriangle(x + 11, y, x + 1, y + 15, x + 9, y + 15, color);
@@ -813,7 +813,7 @@ void draw_outlined_bolt(Gfx &d, int cx, int cy, uint16_t color, uint16_t edge) {
   draw_bolt(d, cx, cy, color);
 }
 
-// Mains plug, centred on (cx, cy): shown when there's no battery.
+// Power plug, centered on (cx, cy): shown when there's no battery.
 void draw_plug_icon(Gfx &d, int cx, int cy, uint16_t color) {
   d.fillRect(cx - 7, cy - 14, 4, 8, color); // prongs
   d.fillRect(cx + 3, cy - 14, 4, 8, color);
@@ -824,7 +824,7 @@ void draw_plug_icon(Gfx &d, int cx, int cy, uint16_t color) {
 constexpr int kBatteryW = 48;
 constexpr int kBatteryH = 24;
 
-// Power icon: a battery filled to its charge level and coloured by it; while charging, an
+// Power icon: a battery filled to its charge level and colored by it; while charging, an
 // empty battery with a green bolt (the voltage-based gauge reads high then); plugged in and
 // full, a full green battery with a light, outlined bolt; with no battery, a plug.
 void draw_power_icon(Gfx &d, const Status &s, int cx, int cy) {
@@ -895,7 +895,7 @@ int draw_wrapped(Gfx &d, const char *text, int x, int y, int wrap, int line_h) {
 // ---------------------------------------------------------------------------
 // The row of controls: under the status bar in portrait, a panel in the left margin in
 // landscape. It holds a slider or power details, and in landscape otherwise a message or the
-// swipe hint.
+// arrow pad.
 // ---------------------------------------------------------------------------
 
 constexpr int kToggleInset = 24; // speaker/headphones selector (volume row) / sun (brightness row)
@@ -1018,7 +1018,7 @@ void power_text(const Controls &c, char *text, size_t len) {
   }
 }
 
-// Text in the side panel, wrapped and centred.
+// Text in the side panel, wrapped and centered.
 void draw_panel_text(Gfx &d, const Layout &l, const char *text) {
   d.setFont(&fonts::FreeSans12pt7b);
   d.setTextDatum(textdatum_t::middle_center);
@@ -1026,12 +1026,12 @@ void draw_panel_text(Gfx &d, const Layout &l, const char *text) {
   draw_wrapped(d, text, l.row.x + l.row.w / 2, l.row.y + 40, l.row.w - 20, 30);
 }
 
-// The arrow pad (keypad.h): the arrows round the centre, and while one is held, the outline of
+// The arrow pad (keypad.h): the arrows around the center, and while one is held, the outline of
 // its wedge within the pad's square.
 struct PadArrow {
   keypad::Icon icon;
   uint8_t bit;
-  int dx, dy; // direction from the centre
+  int dx, dy; // direction from the center
 };
 const PadArrow kPadArrows[] = {{keypad::Icon::kUp, m8proto::kKeyUp, 0, -1},
                                {keypad::Icon::kDown, m8proto::kKeyDown, 0, 1},
@@ -1045,7 +1045,7 @@ void draw_pad(Gfx &d, const keypad::Pad &p, uint8_t held) {
   const int h = p.half - kPressInset;
   for (const PadArrow &a : kPadArrows) {
     const bool down = held & a.bit;
-    if (down) { // the wedge: the centre and the two corners on the arrow's side
+    if (down) { // the wedge: the center and the two corners on the arrow's side
       const int x1 = p.cx + (a.dx ? a.dx : -1) * h, y1 = p.cy + (a.dy ? a.dy : -1) * h;
       const int x2 = p.cx + (a.dx ? a.dx : 1) * h, y2 = p.cy + (a.dy ? a.dy : 1) * h;
       d.drawWideLine(p.cx, p.cy, x1, y1, 1.0f, kKeyPressed);
@@ -1053,7 +1053,7 @@ void draw_pad(Gfx &d, const keypad::Pad &p, uint8_t held) {
       d.drawWideLine(x2, y2, p.cx, p.cy, 1.0f, kKeyPressed);
     }
     draw_icon(d, a.icon, p.cx + a.dx * p.icon_offset, p.cy + a.dy * p.icon_offset, p.icon_size,
-              down ? kKeyPressed : kKeyColour);
+              down ? kKeyPressed : kKeyColor);
   }
 }
 

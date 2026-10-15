@@ -37,7 +37,7 @@ struct {
   int load_mw;     // power drawn from the battery, or -1 while charging
 } battery;
 
-// Battery presence. The Tab5 has no presence signal, and with no pack fitted the charger
+// Battery presence. The Tab5 has no presence signal, and with no pack installed the charger
 // pulses the battery terminal while probing for one, so single readings can't be trusted. A
 // 2S Li-ion pack never sits below about 6 V: any lower reading means no pack, and the pack only
 // counts as present again after the voltage has stayed up for kBatteryReturnMs.

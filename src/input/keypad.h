@@ -1,7 +1,7 @@
 // On-screen M8 keypad: the key layouts (keypad_layout.cpp) and multi-touch hit testing.
 //
 // A key's hit rect may be larger than its drawn rect, so fingers sliding between
-// neighbouring keys don't fall into gaps. Pads group several keys round a centre, each key
+// neighboring keys don't fall into gaps. Pads group several keys around a center, each key
 // owning a wedge of the pad's touch area, so the whole area is live.
 #pragma once
 
@@ -24,12 +24,12 @@ struct Key {
 constexpr int kMaxKeys = 9;
 constexpr int kInset = 3; // drawn keys are inset by this much from their drawn rect
 
-// The arrow pad: UP, DOWN, LEFT and RIGHT in a diamond. The diagonals through its centre split
+// The arrow pad: UP, DOWN, LEFT and RIGHT in a diamond. The diagonals through its center split
 // the touch area into one wedge per arrow.
 struct Pad {
-  int16_t cx, cy;      // centre
+  int16_t cx, cy;      // center
   int16_t half;        // half-size of the square the pressed key's wedge is outlined in
-  int16_t icon_offset; // icon centres from the centre
+  int16_t icon_offset; // icon centers from the center
   int16_t icon_size;
   int16_t x, y, w, h; // touch area
   bool in_panel;      // the arrows in landscape's left panel: live only while it shows them

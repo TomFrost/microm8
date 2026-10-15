@@ -1,5 +1,5 @@
 // M8 display protocol: SLIP-framed draw commands from the M8, and the single-byte
-// command set sent back to it. Ported from m8c's command.c (MIT, Jonne Kokkonen).
+// command set sent back to it. Adapted from m8c (MIT); see LICENSE-THIRD-PARTY.md.
 #pragma once
 
 #include <stddef.h>

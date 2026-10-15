@@ -12,7 +12,7 @@ bool begin(int sample_rate);
 // True if there is a headphone output.
 bool has_headphones();
 
-// Routes audio to `output`, e.g. switching an amp or I2S port. Called from the audio task.
+// Routes audio to `output`, switching the speaker amp. Called from the audio task.
 void route(audio::Output output);
 
 // Sets the codec's analog output volume, 0..audio::kMaxVolume, for whichever output is

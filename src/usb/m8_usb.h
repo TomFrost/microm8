@@ -2,8 +2,7 @@
 //
 // The M8 enumerates as a composite device: a CDC-ACM serial port carrying the SLIP display
 // protocol and key input, USB Audio Class 2.0 streaming in both directions (44.1 kHz, 16-bit
-// stereo), and USB MIDI. See docs/m8-headless-usb.md. This replaces m8c's libusb backend
-// (m8_libusb.c / audio_libusb.c).
+// stereo), and USB MIDI. See docs/m8-headless-usb.md.
 #pragma once
 
 #include <freertos/FreeRTOS.h>

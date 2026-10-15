@@ -6,7 +6,7 @@
 //   <base64 lines: the pixels, run-length encoded>
 //   MICROM8-SCREENSHOT-END <encoded bytes> <crc32 hex>
 // Pixels are the panel's native portrait framebuffer, RGB565 little-endian, row by row,
-// encoded as (uint16 count, uint16 colour) runs. `rotation` is how many quarter turns the UI
+// encoded as (uint16 count, uint16 color) runs. `rotation` is how many quarter turns the UI
 // is rotated on the panel, as M5GFX counts them.
 #pragma once
 

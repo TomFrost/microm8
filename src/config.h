@@ -11,11 +11,11 @@
 // rotation is locked. Set -DTAB5_ROTATE_180=1 if portrait comes up upside down.
 //
 // Portrait (720x1280)                    Landscape (1280x720)
-//   M8 screen 720x540 (2.25x) at top       M8 screen 960x720 (3x), centred
-//   status bar          548..612           left margin: icons, then a panel (vertical slider,
-//   slider/info row     616..692             power details, swipe hint), then SHIFT
-//   keypad (M8 layout)  ..1240             right margin: EDIT, OPTION, PLAY, SHIFT
-//                                          arrows: swipes on the left half of the screen
+//   M8 screen 720x540 (2.25x) at top       M8 screen 960x720 (3x), centered
+//   status bar          548..612           left margin: icons, a panel (arrow pad, vertical
+//   slider/info row     616..692             slider or power details), OPTION over SHIFT
+//   keypad (M8 layout)  ..1240             right margin: icons, EDIT, OPTION, PLAY, SHIFT
+//                                          swipes on the left half also send arrows
 // ---------------------------------------------------------------------------
 #define LCD_WIDTH 720 // portrait
 #define LCD_HEIGHT 1280
@@ -32,7 +32,7 @@
 // Portrait keypad (see keypad_layout.cpp): the M8's own arrangement on a regular grid, with
 // OPTION/EDIT shifted up and right, and SHIFT/PLAY down, by KEY_OFFSET.
 #define KEY_SIZE 144
-#define KEY_SPACING 24 // between neighbouring keys on the grid
+#define KEY_SPACING 24 // between neighboring keys on the grid
 #define KEY_OFFSET 22  // extra shift of the OPTION/EDIT and SHIFT/PLAY pairs
 #define KEY_BOTTOM_MARGIN 40
 
@@ -65,8 +65,9 @@
 #define ARROW_REPEAT_MS 0
 
 // Accelerometer (BMI270) orientation: which screen orientation each axis reading means. At
-// rest the sensor reads +1 g pointing up, away from the ground (opposite to gravity). 0 = portrait, 1 = landscape, 2 = portrait upside down,
-// 3 = landscape the other way round. The "orientation:" log line shows what was sensed.
+// rest the sensor reads +1 g pointing up, away from the ground (opposite to gravity).
+// 0 = portrait, 1 = landscape, 2 = portrait upside down, 3 = landscape the other way around.
+// The "orientation:" log line shows what was sensed.
 #ifndef TAB5_GRAVITY_POS_X
 #define TAB5_GRAVITY_POS_X 3
 #endif
@@ -104,14 +105,14 @@
 #define MICROM8_POWER_DIAG 0
 #endif
 
-// USB passthrough: while an M8 is connected, USB-C presents it to a computer, for m8c or m8.run
-// (see usb/passthru.h). USB-C is the Serial/JTAG port (flashing, logs, screenshots) only while
+// USB passthrough: while an M8 is connected, USB-C presents it to a computer, for m8.run or
+// other M8 tools (see usb/passthru.h). USB-C is the Serial/JTAG port (flashing, logs, screenshots) only while
 // no M8 is connected. 0 keeps USB-C as Serial/JTAG at all times.
 #ifndef MICROM8_USB_PASSTHROUGH
 #define MICROM8_USB_PASSTHROUGH 1
 #endif
 
-// HP_DET reads 1 with headphones plugged in (confirmed on hardware). Plugging in switches to
+// HP_DET reads 1 with headphones plugged in. Plugging in switches to
 // headphones and unplugging back to the speaker. -1 disables automatic switching.
 #ifndef TAB5_HP_DET_INSERTED_LEVEL
 #define TAB5_HP_DET_INSERTED_LEVEL 1

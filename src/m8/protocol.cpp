@@ -1,4 +1,4 @@
-// Ported from m8c's command.c (MIT, Jonne Kokkonen).
+// Adapted from m8c (MIT); see LICENSE-THIRD-PARTY.md.
 
 #include "protocol.h"
 
@@ -37,7 +37,7 @@ slip_handler_t slip;
 DeviceInfo info;
 uint32_t ok_count, bad_count;
 
-// Rectangles may omit colour; the last one sent is reused.
+// Rectangles may omit color; the last one sent is reused.
 m8screen::Rgb last_rect_color = {0, 0, 0};
 
 inline uint16_t u16(const uint8_t *d, int at) { return d[at] | (d[at + 1] << 8); }
@@ -92,7 +92,6 @@ int process_command(const uint8_t *buf, uint32_t size) {
     return 1;
 
   case kJoypadState:
-    // m8c ignores these too.
     return size == kJoypadLen;
 
   case kSystemInfo: {

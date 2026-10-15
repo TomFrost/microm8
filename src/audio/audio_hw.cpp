@@ -182,8 +182,8 @@ bool begin(int sample_rate) {
     }
   }
   // The control-port reset at the start of the sequence doesn't restart the codec's ADC/DAC
-  // state machines, and after a reset of the P4 alone (flashing, the reset button) they were
-  // left running from the previous boot with MCLK pulled from under them. Restart them, as
+  // state machines, and a reset of the P4 alone (flashing, the reset button) leaves them
+  // running from the previous boot with MCLK pulled from under them. Restart them, as
   // Espressif's ES8388 driver does when starting the codec.
   {
     board::I2CLock lock;
@@ -208,7 +208,7 @@ void route(audio::Output output) {
 }
 
 void set_volume(int level) {
-  // Level 10 = +4.5 dB (the previous fixed setting), 9 = 0 dB, 1 = -36 dB. Level 0 is digital
+  // Level 10 = +4.5 dB, 9 = 0 dB, 1 = -36 dB. Level 0 is digital
   // silence in the audio engine; the codec also goes to its minimum.
   int reg = level <= 0 ? 0 : kOutVolMax - (audio::kMaxVolume - level) * kOutVolStepsPerLevel;
   if (reg < 0) reg = 0;

@@ -88,12 +88,12 @@ def rgb565_table():
 
 
 def decode(width, height, data):
-    """Run-length (count, colour) pairs to RGB bytes, in the panel's native orientation."""
+    """Run-length (count, color) pairs to RGB bytes, in the panel's native orientation."""
     table = rgb565_table()
     parts = []
     pixels = 0
-    for count, colour in struct.iter_unpack("<HH", data):
-        parts.append(table[colour] * count)
+    for count, color in struct.iter_unpack("<HH", data):
+        parts.append(table[color] * count)
         pixels += count
     if pixels != width * height:
         sys.exit(f"Got {pixels} pixels, expected {width * height}: try again")
