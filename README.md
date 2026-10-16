@@ -7,7 +7,7 @@
 </p>
 
 microm8 is firmware for the [M5Stack Tab5](https://shop.m5stack.com/products/m5stack-tab5-iot-development-kit-esp32-p4)
-that turns it into a portable M8. Plug a Teensy 4.1 running
+that turns it into a portable M8 Headless controller. Plug a Teensy 4.1 running
 [M8 Headless](https://github.com/Dirtywave/M8HeadlessFirmware) into the Tab5's USB-A port and
 you get the M8 on a 5" touchscreen, with a speaker, a headphone jack, two microphones for
 sampling, and a battery that powers the Teensy too. Nothing to configure, no computer needed after flashing.
@@ -18,7 +18,7 @@ directly, while the Tab5 keeps playing.
 > [!IMPORTANT]
 > **The M8 is Trash80's work, and the real thing is better.** microm8 only exists because
 > Dirtywave publishes M8 Headless for free. The M8 hardware, with its real keys, its build
-> quality, its I/O ports, and its battery life, is and always will be the best way to play
+> quality, its ports (MIDI!), and its battery life, is and always will be the best way to play
 > the M8, and the M8 app is the best way to take it anywhere on your phone. If you enjoy
 > microm8, please support the person who made all of it:
 >
@@ -48,7 +48,7 @@ Turn the Tab5 any way you like and the screen follows, or lock it when you want 
 </table>
 
 **Sound everywhere.** The Tab5's speaker for quick ideas, the 3.5 mm jack for everything else.
-Headphone detection picks the right output, and we save a separate volume setting for each.
+Headphone detection picks the right output, and it saves a separate volume setting for each.
 
 **Sample ready.** The Tab5's two microphones record in stereo straight into the M8's
 sampler. Enable the mics when you're ready, and the M8's built-in input volume setting controls
@@ -308,7 +308,7 @@ platform (Arduino core 3.x on ESP-IDF 5.5), because the stock PlatformIO platfor
 own fork of PlatformIO Core, **pioarduino** 6.2.0 or later. Install it with either:
 
 - the [pioarduino IDE](https://marketplace.visualstudio.com/items?itemName=pioarduino.pioarduino-ide)
-  extension for VS Code (or Cursor), which puts `pio` in `~/.platformio/penv/bin`, or
+  extension for VS Code, which puts `pio` in `~/.platformio/penv/bin`, or
 - `pipx install pioarduino` for the command line.
 
 Use one or the other, not the upstream PlatformIO Core (`brew install platformio`, `pip install
@@ -325,14 +325,11 @@ core from ESP-IDF source. Later builds take seconds. Every build also writes
 `.pio/build/tab5/firmware.factory.bin`, the single image (flashed at `0x0`) that releases ship
 as `microm8-tab5.bin`. The `tab5_r3` env builds the same firmware for chip revision v3.
 
-Pushing a version tag (`v1.0.0`, ...) runs `.github/workflows/release.yml`, which runs the
-tests, builds both images and publishes them as a GitHub release.
-
 While the M8 is connected, USB-C is the M8 rather than the Tab5's serial port. Either unplug
-the M8, or run `python3 tools/passthru.py serial` (needs `brew install libusb`), which gives
-USB-C back to the serial port until the M8 reconnects or the Tab5 restarts. Flashing restarts
-the Tab5, which then passes the M8 through again. To keep USB-C as the serial port at all
-times, set `MICROM8_USB_PASSTHROUGH` to 0 in `src/config.h`.
+the M8, or run `python3 tools/passthru.py serial` (needs libusb -- `brew install libusb` if you
+have Homebrew. Figure it out if not ;D), which gives USB-C back to the serial port until the M8
+reconnects or the Tab5 restarts. Flashing restarts the Tab5, which then passes the M8 through
+again. To keep USB-C as the serial port at all times, set `MICROM8_USB_PASSTHROUGH` to 0 in `src/config.h`.
 
 ### Tests
 
