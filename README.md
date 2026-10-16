@@ -200,7 +200,7 @@ on until you tap its icon.
 1. Tap the mic icon and switch the mics on. The icon turns red.
 2. In the M8's sample recorder, set SRC to Line (L&R) or MIC (on the Headless they're the same input).
 3. Set the level with the recorder's VOL. A0 works well for a voice within about a foot. If
-   you go to DD and that's still not enough, the mic row's boost adds +6 or +12 dB digitally.
+   you go to FF and that's still not enough, the mic row's boost adds +6 or +12 dB digitally.
 
 The left and right mics record as a stereo pair. The quality on this thing is surprisingly good.
 
